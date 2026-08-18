@@ -1,0 +1,683 @@
+/* ==========================================================
+   ADN – Productos WooCommerce  v1.0.0
+   ========================================================== */
+
+/* Grid principal */
+.adn-productos-grid {
+    list-style: none !important;
+    padding: 24px 0 !important;
+    margin: 0 auto !important;
+    display: grid !important;
+    grid-template-columns: repeat(var(--adn-columns, 3), 1fr) !important;
+    gap: 24px !important;
+    float: none !important;
+}
+
+/* Override WooCommerce: anula width/float que rompe el grid */
+.woocommerce ul.products.adn-productos-grid,
+ul.products.adn-productos-grid {
+    display: grid !important;
+    grid-template-columns: repeat(var(--adn-columns, 3), 1fr) !important;
+    gap: 24px !important;
+    float: none !important;
+    padding: 24px 0 !important;
+    margin: 0 !important;
+}
+
+.woocommerce ul.products.adn-productos-grid li.product,
+ul.products.adn-productos-grid li.adn-producto-item {
+    width: auto !important;
+    float: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    clear: none !important;
+}
+
+/* Tarjeta de producto */
+.adn-producto-item {
+    padding: 0 !important;
+    background: #fff !important;
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 12px !important;
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+    transition: box-shadow 0.25s ease, transform 0.25s ease, border-color 0.25s ease !important;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06) !important;
+}
+
+.adn-producto-item:hover {
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.12) !important;
+    transform: translateY(-3px) !important;
+    border-color: #c7d7ed !important;
+}
+
+/* Enlace que cubre imagen + info */
+.adn-producto-link {
+    text-decoration: none;
+    color: inherit;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+}
+
+/* Contenedor de imagen */
+.adn-producto-imagen {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    overflow: hidden;
+    background: #f7f7f7;
+    flex-shrink: 0;
+}
+
+.adn-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    transition: transform 0.35s ease;
+}
+
+.adn-producto-item:hover .adn-img {
+    transform: scale(1.06);
+}
+
+.adn-img-placeholder {
+    object-fit: contain;
+    padding: 20px;
+    opacity: 0.45;
+}
+
+/* Badges */
+.adn-badge {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    padding: 3px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    z-index: 1;
+    pointer-events: none;
+}
+
+.adn-badge-oferta {
+    background: #e63946;
+    color: #fff;
+}
+
+.adn-badge-agotado {
+    background: #777;
+    color: #fff;
+}
+
+/* Sección de información */
+.adn-producto-info {
+    padding: 14px 16px 10px;
+    flex: 1;
+}
+
+/* Título del producto */
+.adn-producto-titulo {
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.45;
+    margin: 0 0 8px;
+    color: #1a1a1a;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* Precio */
+.adn-producto-precio {
+    font-size: 16px;
+    font-weight: 700;
+    color: #e63946;
+    line-height: 1.2;
+}
+
+.adn-producto-precio .woocommerce-Price-amount {
+    color: inherit;
+}
+
+.adn-producto-precio del {
+    color: #aaa;
+    font-weight: 400;
+    font-size: 13px;
+    margin-right: 6px;
+}
+
+.adn-producto-precio ins {
+    text-decoration: none;
+    color: #e63946;
+}
+
+/* Botón de acción */
+.adn-producto-accion {
+    padding: 0 16px 16px;
+    margin-top: auto;
+}
+
+.adn-btn-carrito {
+    display: block;
+    width: 100%;
+    padding: 10px 8px;
+    text-align: center;
+    background: #2271b1;
+    color: #fff !important;
+    border-radius: 6px;
+    text-decoration: none !important;
+    font-size: 13px;
+    font-weight: 600;
+    border: none;
+    cursor: pointer;
+    transition: background 0.2s ease;
+    box-sizing: border-box;
+}
+
+.adn-btn-carrito:hover,
+.adn-btn-carrito:focus {
+    background: #135e96;
+    color: #fff !important;
+    text-decoration: none !important;
+}
+
+/* Estado "añadido" AJAX de WooCommerce */
+.adn-btn-carrito.added {
+    background: #388e3c;
+}
+
+.adn-btn-carrito.loading {
+    opacity: 0.7;
+    pointer-events: none;
+}
+
+/* Sin stock */
+.adn-btn-agotado {
+    display: block;
+    width: 100%;
+    padding: 10px 8px;
+    text-align: center;
+    background: #f0f0f0;
+    color: #888;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    box-sizing: border-box;
+}
+
+/* Mensajes de error / vacío */
+.adn-error,
+.adn-sin-productos {
+    padding: 16px;
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+    border-radius: 6px;
+    color: #6b4400;
+    font-size: 14px;
+}
+
+/* ==========================================================
+   Responsive
+   ========================================================== */
+
+/* Tablet: máximo 2 columnas si hay 3+ configuradas */
+@media (max-width: 900px) {
+    .adn-productos-grid {
+        grid-template-columns: repeat(
+            min(var(--adn-columns, 3), 2),
+            1fr
+        ) !important;
+    }
+}
+
+/* Móvil: siempre 1 columna */
+@media (max-width: 540px) {
+    .adn-productos-grid {
+        grid-template-columns: 1fr !important;
+        gap: 16px;
+    }
+
+    .adn-producto-titulo {
+        font-size: 13px;
+    }
+}
+
+/* ==========================================================
+   Brands Slider
+   ========================================================== */
+
+.adn-brands-slider-outer {
+    padding: 16px 0;
+}
+
+/* Wrapper con flechas */
+.adn-brands-slider-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Área visible del slider */
+.adn-brands-viewport {
+    flex: 1;
+    overflow: hidden;
+}
+
+/* Track deslizable */
+.adn-brands-track {
+    display: flex;
+    flex-wrap: nowrap;
+    transition: transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    will-change: transform;
+}
+
+/* Cada slide ocupa 1/N del viewport según CSS var --adn-slide-cols */
+.adn-brand-slide {
+    flex: 0 0 calc(100% / var(--adn-slide-cols, 4));
+    padding: 0 8px;
+    box-sizing: border-box;
+}
+
+/* Tarjeta de marca */
+.adn-brand-link {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-decoration: none;
+    color: inherit;
+    background: #fff;
+    border: 1px solid #e8e8e8;
+    border-radius: 10px;
+    padding: 14px 10px;
+    text-align: center;
+    transition: box-shadow 0.25s ease, transform 0.25s ease;
+    height: 100%;
+    box-sizing: border-box;
+}
+
+.adn-brand-link:hover {
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.10);
+    transform: translateY(-2px);
+    text-decoration: none;
+}
+
+/* Imagen de la marca */
+.adn-brand-img-wrap {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    margin-bottom: 10px;
+    border-radius: 6px;
+    background: #f7f7f7;
+}
+
+.adn-brand-img-wrap img {
+    max-width: 85%;
+    max-height: 85%;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    transition: transform 0.3s ease;
+}
+
+.adn-brand-link:hover .adn-brand-img-wrap img {
+    transform: scale(1.08);
+}
+
+/* Nombre de la marca */
+.adn-brand-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: #1a1a1a;
+    line-height: 1.3;
+    display: block;
+    word-break: break-word;
+}
+
+/* Contador de productos */
+.adn-brand-count {
+    font-size: 11px;
+    color: #999;
+    margin-top: 4px;
+    display: block;
+}
+
+/* Botones de navegación */
+.adn-brands-nav {
+    flex-shrink: 0;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    border: 1px solid #e0e0e0;
+    background: #fff;
+    color: #444;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+    padding: 0;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+
+.adn-brands-nav:hover:not(:disabled) {
+    background: #2271b1;
+    color: #fff;
+    border-color: #2271b1;
+}
+
+.adn-brands-nav:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+/* Dots de paginación */
+.adn-brands-dots {
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+    margin-top: 14px;
+}
+
+.adn-brands-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    border: none;
+    background: #ddd;
+    cursor: pointer;
+    padding: 0;
+    transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.adn-brands-dot.active {
+    background: #2271b1;
+    transform: scale(1.3);
+}
+
+/* ==========================================================
+   Brands Slider — Responsive
+   ========================================================== */
+
+@media (max-width: 900px) {
+    .adn-brands-slider-wrapper {
+        --adn-slide-cols: 2;
+    }
+
+    .adn-brands-nav {
+        width: 34px;
+        height: 34px;
+    }
+}
+
+@media (max-width: 540px) {
+    .adn-brands-slider-wrapper {
+        --adn-slide-cols: 2;
+        gap: 4px;
+    }
+
+    .adn-brands-nav {
+        width: 30px;
+        height: 30px;
+    }
+
+    .adn-brand-slide {
+        padding: 0 4px;
+    }
+
+    .adn-brand-name {
+        font-size: 12px;
+    }
+}
+
+/* ==========================================================
+   Paginacion de Productos
+   ========================================================== */
+
+.adn-productos-wrapper .adn-pagination {
+    margin: 36px 0 12px;
+    display: flex;
+    justify-content: center;
+}
+
+.adn-productos-wrapper .adn-pagination-list {
+    list-style: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 8px !important;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+
+.adn-productos-wrapper .adn-pagination-list li {
+    list-style: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+/* Links y spans generados por paginate_links */
+.adn-productos-wrapper .adn-pagination-item a,
+.adn-productos-wrapper .adn-pagination-item span {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    min-width: 40px;
+    height: 40px;
+    padding: 0 12px;
+    border-radius: 8px;
+    border: 1px solid transparent !important;
+    background: transparent !important;
+    color: #374151 !important;
+    font-size: 14px;
+    font-weight: 500;
+    text-decoration: none !important;
+    transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+    line-height: 1;
+    box-sizing: border-box;
+    cursor: pointer;
+}
+
+/* Hover */
+.adn-productos-wrapper .adn-pagination-item a:hover {
+    background: #2271b1 !important;
+    color: #fff !important;
+    border-color: #2271b1 !important;
+    text-decoration: none !important;
+    box-shadow: 0 2px 8px rgba(34,113,177,0.25) !important;
+}
+
+/* Pagina activa */
+.adn-productos-wrapper .adn-pagination-item.is-current span,
+.adn-productos-wrapper .adn-pagination-item span.current {
+    background: #2271b1 !important;
+    color: #fff !important;
+    border-color: #2271b1 !important;
+    font-weight: 700 !important;
+    cursor: default;
+    pointer-events: none;
+    box-shadow: 0 2px 8px rgba(34,113,177,0.30) !important;
+}
+
+/* Puntos suspensivos */
+.adn-productos-wrapper .adn-pagination-item.is-dots span {
+    border-color: transparent !important;
+    background: transparent !important;
+    color: #9ca3af !important;
+    min-width: 28px;
+    padding: 0 4px !important;
+    cursor: default;
+    pointer-events: none;
+}
+
+/* Prev / Next */
+.adn-productos-wrapper .adn-pagination-item a[rel="prev"],
+.adn-productos-wrapper .adn-pagination-item a[rel="next"] {
+    min-width: 40px;
+    padding: 0 !important;
+    color: #2271b1 !important;
+    font-weight: 700 !important;
+    font-size: 16px !important;
+}
+
+.adn-productos-wrapper .adn-pagination-item a[rel="prev"]:hover,
+.adn-productos-wrapper .adn-pagination-item a[rel="next"]:hover {
+    background: #2271b1 !important;
+    color: #fff !important;
+    border-color: #2271b1 !important;
+}
+
+@media (max-width: 540px) {
+    .adn-productos-wrapper .adn-pagination-list {
+        padding: 6px !important;
+        gap: 4px;
+    }
+    .adn-productos-wrapper .adn-pagination-item a,
+    .adn-productos-wrapper .adn-pagination-item span {
+        min-width: 36px;
+        height: 36px;
+        font-size: 13px;
+        padding: 0 8px;
+    }
+}
+
+/* ── Contador de resultados ── */
+.adn-resultado-count {
+    margin: 0 0 12px !important;
+    font-size: 13px !important;
+    color: #64748b !important;
+    font-weight: 500 !important;
+    padding: 0 !important;
+    line-height: 1 !important;
+    text-align: right !important;
+    width: 100% !important;
+    display: block !important;
+}
+
+/* ── Estado de carga AJAX ── */
+.adn-productos-wrapper.adn-cargando .adn-productos-grid {
+    opacity: 0.4;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+}
+
+/* ── Barra de filtros: búsqueda + ordenamiento ── */
+.adn-filtros-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.adn-filtro-busqueda {
+    flex: 1;
+    min-width: 200px;
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.adn-filtro-busqueda svg {
+    position: absolute;
+    left: 12px;
+    color: #94a3b8;
+    pointer-events: none;
+    flex-shrink: 0;
+}
+
+.adn-filtro-busqueda .adn-search-input {
+    width: 100%;
+    padding: 10px 16px 10px 38px;
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 8px !important;
+    font-size: 14px !important;
+    background: #fff !important;
+    color: #1e293b !important;
+    box-shadow: none !important;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    outline: none;
+    box-sizing: border-box;
+}
+
+.adn-filtro-busqueda .adn-search-input:focus {
+    border-color: #6366f1 !important;
+    box-shadow: 0 0 0 3px rgba(99,102,241,0.15) !important;
+}
+
+.adn-filtro-orden .adn-orderby-select {
+    padding: 10px 36px 10px 14px;
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 8px !important;
+    font-size: 14px !important;
+    background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") no-repeat right 12px center !important;
+    appearance: none;
+    -webkit-appearance: none;
+    cursor: pointer;
+    color: #1e293b !important;
+    box-shadow: none !important;
+    transition: border-color 0.2s ease;
+}
+
+.adn-filtro-orden .adn-orderby-select:focus {
+    border-color: #6366f1 !important;
+    outline: none;
+}
+
+@media (max-width: 540px) {
+    .adn-filtros-bar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .adn-filtro-orden .adn-orderby-select {
+        width: 100%;
+    }
+}
+
+/* ── Páginas de categoría / tienda (loop nativo WooCommerce) ── */
+.woocommerce ul.products:not(.adn-productos-grid),
+.woocommerce-page ul.products:not(.adn-productos-grid) {
+    display: grid !important;
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 24px !important;
+    float: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+.woocommerce ul.products:not(.adn-productos-grid) li.product,
+.woocommerce-page ul.products:not(.adn-productos-grid) li.product {
+    width: auto !important;
+    float: none !important;
+    margin: 0 !important;
+    clear: none !important;
+}
+
+@media (max-width: 768px) {
+    .woocommerce ul.products:not(.adn-productos-grid),
+    .woocommerce-page ul.products:not(.adn-productos-grid) {
+        grid-template-columns: repeat(2, 1fr) !important;
+    }
+}
+
+@media (max-width: 480px) {
+    .woocommerce ul.products:not(.adn-productos-grid),
+    .woocommerce-page ul.products:not(.adn-productos-grid) {
+        grid-template-columns: 1fr !important;
+    }
+}
