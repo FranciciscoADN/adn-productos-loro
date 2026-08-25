@@ -38,16 +38,156 @@ class ADN_Productos_Plugin {
         add_action( 'rest_api_init',                       array( $this, 'register_sync_endpoints' ) );
         add_action( 'woocommerce_order_status_changed',    array( $this, 'enqueue_order_for_adn' ), 10, 4 );
 
+        // ADN es la fuente de verdad para stock — WooCommerce NO debe descontar
+        add_filter( 'woocommerce_can_reduce_order_stock', '__return_false' );
+
+        // Imagen por defecto para productos sin foto (página de detalle y en todo WooCommerce)
+        add_filter( 'woocommerce_placeholder_img_src', array( $this, 'custom_placeholder_img' ) );
+
         // Columnas en páginas de tienda/categoría
         add_filter( 'loop_shop_columns', array( $this, 'set_shop_columns' ), 999 );
 
         // Filtrado AJAX sin recarga
         add_action( 'wp_ajax_adn_filter_products',        array( $this, 'ajax_filter_products' ) );
         add_action( 'wp_ajax_nopriv_adn_filter_products', array( $this, 'ajax_filter_products' ) );
+
+        // Filtro de marcas: shortcode + widget
+        add_shortcode( 'adn_filtro_marcas', array( $this, 'render_filtro_marcas' ) );
+        add_action( 'widgets_init', function () {
+            register_widget( 'ADN_Marcas_Filter_Widget' );
+        } );
+
+        // Checkout: copiar billing → shipping meta cuando envío está vacío (compatible con Blocks)
+        add_action( 'template_redirect', array( $this, 'sync_shipping_from_billing' ) );
+
+        // Código postal opcional (clientes ADN tienen 0000001 por defecto, no válido)
+        add_filter( 'woocommerce_default_address_fields', array( $this, 'make_postcode_optional' ) );
+    }
+
+    /**
+     * Copia los campos de facturación al meta de envío cuando están vacíos.
+     * Compatible con WooCommerce Blocks (Block Checkout) ya que actúa sobre
+     * el user meta que Blocks lee vía Store API.
+     * Solo se ejecuta en la página de checkout con usuario logueado.
+     */
+    public function sync_shipping_from_billing() {
+        if ( ! is_checkout() || ! is_user_logged_in() ) {
+            return;
+        }
+
+        $user_id = get_current_user_id();
+        $fields  = array(
+            'first_name', 'last_name', 'company',
+            'address_1', 'address_2',
+            'city', 'state', 'postcode', 'country', 'phone',
+        );
+
+        foreach ( $fields as $field ) {
+            $shipping_val = get_user_meta( $user_id, 'shipping_' . $field, true );
+            if ( ! empty( $shipping_val ) ) {
+                continue; // ya tiene valor, no sobreescribir
+            }
+            $billing_val = get_user_meta( $user_id, 'billing_' . $field, true );
+            if ( ! empty( $billing_val ) ) {
+                update_user_meta( $user_id, 'shipping_' . $field, $billing_val );
+            }
+        }
+
+        // Fallback desde perfil WordPress si billing también está vacío
+        $user = wp_get_current_user();
+        if ( empty( get_user_meta( $user_id, 'shipping_first_name', true ) ) && ! empty( $user->first_name ) ) {
+            update_user_meta( $user_id, 'shipping_first_name', $user->first_name );
+            update_user_meta( $user_id, 'billing_first_name',  $user->first_name );
+        }
+        if ( empty( get_user_meta( $user_id, 'shipping_last_name', true ) ) && ! empty( $user->last_name ) ) {
+            update_user_meta( $user_id, 'shipping_last_name', $user->last_name );
+            update_user_meta( $user_id, 'billing_last_name',  $user->last_name );
+        }
+    }
+
+    public function make_postcode_optional( $fields ) {
+        $fields['postcode']['required'] = false;
+        return $fields;
     }
 
     public function set_shop_columns( $columns ) {
         return 3;
+    }
+
+    public function custom_placeholder_img( $src ) {
+        return content_url( 'uploads/2026/08/logo_varela_insta.jpg' );
+    }
+
+    /**
+     * Detecta la taxonomía de marcas activa en WooCommerce.
+     * Prueba nombres conocidos y luego busca automáticamente cualquier taxonomía
+     * de productos cuyo nombre o etiqueta contenga "brand" o "marca".
+     */
+    private function detect_brand_taxonomy(): string {
+        $known = array(
+            'product_brand',       // WooCommerce oficial / Perfect Brands
+            'pwb-brand',           // Perfect Brands for WooCommerce
+            'berocket_brand',      // BeRocket Brands
+            'wc_product_brands',   // WooCommerce Brands (antiguo)
+            'brand',               // genérico
+            'brands',              // genérico plural
+            'yith_product_brand',  // YITH Brands
+            'pa_brand',            // Atributo WooCommerce
+        );
+        foreach ( $known as $tax ) {
+            if ( taxonomy_exists( $tax ) ) { return $tax; }
+        }
+        // Fallback: cualquier taxonomía de productos con "brand" o "marca" en el nombre
+        foreach ( get_object_taxonomies( 'product', 'objects' ) as $tax_obj ) {
+            $n = strtolower( $tax_obj->name );
+            $l = strtolower( $tax_obj->label );
+            if ( strpos( $n, 'brand' ) !== false || strpos( $l, 'brand' ) !== false
+                 || strpos( $n, 'marca' ) !== false || strpos( $l, 'marca' ) !== false ) {
+                return $tax_obj->name;
+            }
+        }
+        return '';
+    }
+
+    /**
+     * Shortcode [adn_filtro_marcas] — lista de marcas con checkboxes para filtrar productos.
+     */
+    public function render_filtro_marcas( $atts ) {
+        $atts = shortcode_atts( array( 'titulo' => '' ), $atts, 'adn_filtro_marcas' );
+
+        $brand_tax = $this->detect_brand_taxonomy();
+        if ( ! $brand_tax ) { return '<!-- adn_filtro_marcas: no se encontró taxonomía de marcas -->'; }
+
+        $terms = get_terms( array(
+            'taxonomy'   => $brand_tax,
+            'hide_empty' => true,
+            'orderby'    => 'name',
+            'order'      => 'ASC',
+        ) );
+        if ( empty( $terms ) || is_wp_error( $terms ) ) { return '<!-- adn_filtro_marcas: sin términos en ' . esc_attr( $brand_tax ) . ' -->'; }
+
+        ob_start();
+        if ( ! empty( $atts['titulo'] ) ) {
+            echo '<h4 class="adn-marcas-titulo">' . esc_html( $atts['titulo'] ) . '</h4>';
+        }
+        ?>
+        <ul class="adn-marcas-filter-list" data-brand-tax="<?php echo esc_attr( $brand_tax ); ?>">
+            <?php foreach ( $terms as $term ) : ?>
+            <li class="adn-marca-item">
+                <label>
+                    <input type="checkbox"
+                           class="adn-marca-check"
+                           data-taxonomy="<?php echo esc_attr( $brand_tax ); ?>"
+                           data-slug="<?php echo esc_attr( $term->slug ); ?>"
+                           value="<?php echo esc_attr( $term->slug ); ?>">
+                    <span class="adn-marca-nombre"><?php echo esc_html( $term->name ); ?></span>
+                    <span class="adn-marca-count">(<?php echo (int) $term->count; ?>)</span>
+                </label>
+            </li>
+            <?php endforeach; ?>
+        </ul>
+        <?php
+        return ob_get_clean();
     }
 
     /**
@@ -66,10 +206,15 @@ class ADN_Productos_Plugin {
      */
     public function enqueue_assets() {
         global $post;
-        $has_productos = is_a( $post, 'WP_Post' ) && has_shortcode( $post->post_content, 'adn_productos' );
-        $has_brands    = is_a( $post, 'WP_Post' ) && has_shortcode( $post->post_content, 'product_brand_thumbnails' );
+        $has_productos     = is_a( $post, 'WP_Post' ) && has_shortcode( $post->post_content, 'adn_productos' );
+        $has_brands        = is_a( $post, 'WP_Post' ) && has_shortcode( $post->post_content, 'product_brand_thumbnails' );
+        $has_filtro_marcas = is_a( $post, 'WP_Post' ) && has_shortcode( $post->post_content, 'adn_filtro_marcas' );
+        // También cargar si hay un widget activo en la página
+        $has_filtro_marcas = $has_filtro_marcas || is_active_widget( false, false, 'adn_marcas_filter', true );
+        // Cargar en páginas de tienda/categoría donde BeRocket muestra sus filtros
+        $has_berocket = is_shop() || is_product_category() || is_product_tag();
 
-        if ( ! $has_productos && ! $has_brands ) {
+        if ( ! $has_productos && ! $has_brands && ! $has_filtro_marcas && ! $has_berocket ) {
             return;
         }
 
@@ -108,6 +253,61 @@ class ADN_Productos_Plugin {
         if ( $has_productos && class_exists( 'WooCommerce' ) ) {
             wp_enqueue_script( 'wc-add-to-cart' );
         }
+
+        // Toggle colapsable para secciones de filtros BeRocket
+        wp_add_inline_style( 'adn-productos-style', '
+            .bapf_head,
+            .adn-marcas-titulo { position: relative; cursor: pointer; user-select: none; padding-right: 32px; }
+            .bapf_head h3, .bapf_head h5, .bapf_head * { pointer-events: none; }
+            .bapf_toggle_btn {
+                position: absolute;
+                right: 4px;
+                top: 50%;
+                transform: translateY(-50%);
+                width: 22px;
+                height: 22px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 18px;
+                color: #444;
+                line-height: 1;
+                pointer-events: none;
+            }
+            .bapf_sfilter.adn-collapsed .bapf_body { display: none !important; }
+            .adn-marcas-titulo.adn-collapsed + .adn-marcas-filter-list { display: none !important; }
+        ' );
+        wp_add_inline_script( 'jquery', '
+            jQuery(function($){
+                var svgUp   = \'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="8 14 12 9 16 14"/></svg>\';
+                var svgDown = \'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="8 10 12 15 16 10"/></svg>\';
+                function initBapfToggle() {
+                    $(".bapf_head").each(function(){
+                        if ($(this).find(".bapf_toggle_btn").length) return;
+                        $(this).append($("<span class=\"bapf_toggle_btn\"></span>").html(svgUp));
+                    });
+                    $(".adn-marcas-titulo").each(function(){
+                        if ($(this).find(".bapf_toggle_btn").length) return;
+                        $(this).append($("<span class=\"bapf_toggle_btn\"></span>").html(svgUp));
+                    });
+                }
+                initBapfToggle();
+                $(document).on("click", ".bapf_head", function(){
+                    var $filter = $(this).closest(".bapf_sfilter");
+                    var $btn    = $(this).find(".bapf_toggle_btn");
+                    $filter.toggleClass("adn-collapsed");
+                    $btn.html($filter.hasClass("adn-collapsed") ? svgDown : svgUp);
+                });
+                $(document).on("click", ".adn-marcas-titulo", function(){
+                    var $btn = $(this).find(".bapf_toggle_btn");
+                    $(this).toggleClass("adn-collapsed");
+                    $btn.html($(this).hasClass("adn-collapsed") ? svgDown : svgUp);
+                });
+                $(document).on("berocket_ajax_products_loaded berocket_products_loaded", function(){
+                    initBapfToggle();
+                });
+            });
+        ' );
     }
 
     /**
@@ -182,10 +382,17 @@ class ADN_Productos_Plugin {
 
         $current_search  = isset( $_GET['s'] ) ? sanitize_text_field( wp_unslash( $_GET['s'] ) ) : '';
         $current_orderby = isset( $_GET['orderby'] ) ? sanitize_key( wp_unslash( $_GET['orderby'] ) ) : '';
+        $current_brand   = isset( $_GET['filter_brand'] ) ? sanitize_key( wp_unslash( $_GET['filter_brand'] ) ) : '';
+
+        // Detectar taxonomía de marcas activa
+        $brand_tax   = $this->detect_brand_taxonomy();
+        $brand_terms = $brand_tax
+            ? get_terms( array( 'taxonomy' => $brand_tax, 'hide_empty' => true, 'orderby' => 'name', 'order' => 'ASC' ) )
+            : array();
 
         ob_start();
         ?>
-        <div class="adn-productos-wrapper woocommerce" data-columns="<?php echo esc_attr( $columns ); ?>" data-per-page="<?php echo esc_attr( $args['posts_per_page'] ); ?>">
+        <div class="adn-productos-wrapper woocommerce" data-columns="<?php echo esc_attr( $columns ); ?>" data-per-page="<?php echo esc_attr( $args['posts_per_page'] ); ?>" data-brand-tax="<?php echo esc_attr( $brand_tax ); ?>">
 
             <div class="adn-filtros-bar">
                 <div class="adn-filtro-busqueda">
@@ -207,6 +414,18 @@ class ADN_Productos_Plugin {
                         <option value="popularity"<?php selected( $current_orderby, 'popularity' ); ?>><?php esc_html_e( 'Más populares', 'adn-productos' ); ?></option>
                     </select>
                 </div>
+                <?php if ( ! empty( $brand_terms ) && ! is_wp_error( $brand_terms ) ) : ?>
+                <div class="adn-filtro-marca">
+                    <select id="adn-brand-select" class="adn-brand-select" aria-label="<?php esc_attr_e( 'Filtrar por marca', 'adn-productos' ); ?>">
+                        <option value=""><?php esc_html_e( 'Todas las marcas', 'adn-productos' ); ?></option>
+                        <?php foreach ( $brand_terms as $bt ) : ?>
+                        <option value="<?php echo esc_attr( $bt->slug ); ?>" <?php selected( $current_brand, $bt->slug ); ?>>
+                            <?php echo esc_html( $bt->name ); ?>
+                        </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <?php endif; ?>
             </div>
 
             <p class="adn-resultado-count"><?php
@@ -476,6 +695,23 @@ class ADN_Productos_Plugin {
             $args['tax_query']['relation'] = 'AND';
         }
 
+        // Página actual desde POST (location_search o adn_paged directo)
+        $ajax_paged = 1;
+        if ( ! empty( $_POST['adn_paged'] ) ) {
+            $ajax_paged = max( 1, intval( $_POST['adn_paged'] ) );
+        } elseif ( ! empty( $_POST['location_search'] ) ) {
+            $ls_raw = ltrim( sanitize_text_field( wp_unslash( $_POST['location_search'] ) ), '?' );
+            parse_str( $ls_raw, $ls_parsed );
+            if ( ! empty( $ls_parsed['adn_paged'] ) ) {
+                $ajax_paged = max( 1, intval( $ls_parsed['adn_paged'] ) );
+            }
+        }
+        $args['paged'] = $ajax_paged;
+
+        $location_href = ! empty( $_POST['location_href'] )
+            ? sanitize_url( wp_unslash( $_POST['location_href'] ) )
+            : '';
+
         $query = new WP_Query( $args );
 
         ob_start();
@@ -490,7 +726,7 @@ class ADN_Productos_Plugin {
                 echo $this->render_product_card( $product ); // phpcs:ignore
             }
             echo '</ul>';
-            echo $this->render_pagination( $query ); // phpcs:ignore
+            echo $this->render_pagination( $query, $location_href ); // phpcs:ignore
         }
         wp_reset_postdata();
 
@@ -736,20 +972,29 @@ class ADN_Productos_Plugin {
      * @param WP_Query $query Query ejecutado.
      * @return string HTML de la paginación o cadena vacía.
      */
-    private function render_pagination( $query ) {
+    private function render_pagination( $query, $base_override = '' ) {
         $max_pages = (int) $query->max_num_pages;
         if ( $max_pages <= 1 ) {
             return '';
         }
 
-        $paged = isset( $_GET['adn_paged'] ) ? max( 1, intval( $_GET['adn_paged'] ) ) : 1;
-
-        // URL base: URL actual con todos los GET params salvo adn_paged
-        $request_uri = isset( $_SERVER['REQUEST_URI'] ) ? sanitize_url( wp_unslash( $_SERVER['REQUEST_URI'] ) ) : '';
-        $scheme      = is_ssl() ? 'https' : 'http';
-        $host        = isset( $_SERVER['HTTP_HOST'] ) ? sanitize_text_field( wp_unslash( $_SERVER['HTTP_HOST'] ) ) : '';
-        $full_url    = $scheme . '://' . $host . $request_uri;
-        $base_url    = remove_query_arg( 'adn_paged', $full_url );
+        if ( $base_override ) {
+            // AJAX: extraer adn_paged de la URL enviada por JS
+            $bo_parts = wp_parse_url( $base_override );
+            $bo_qs    = array();
+            if ( ! empty( $bo_parts['query'] ) ) {
+                parse_str( $bo_parts['query'], $bo_qs );
+            }
+            $paged    = isset( $bo_qs['adn_paged'] ) ? max( 1, intval( $bo_qs['adn_paged'] ) ) : 1;
+            $base_url = remove_query_arg( 'adn_paged', sanitize_url( $base_override ) );
+        } else {
+            // Carga normal: usar REQUEST_URI
+            $request_uri = isset( $_SERVER['REQUEST_URI'] ) ? sanitize_url( wp_unslash( $_SERVER['REQUEST_URI'] ) ) : '';
+            $scheme      = is_ssl() ? 'https' : 'http';
+            $host        = isset( $_SERVER['HTTP_HOST'] ) ? sanitize_text_field( wp_unslash( $_SERVER['HTTP_HOST'] ) ) : '';
+            $full_url    = $scheme . '://' . $host . $request_uri;
+            $base_url    = remove_query_arg( 'adn_paged', $full_url );
+        }
         $sep         = strpos( $base_url, '?' ) !== false ? '&' : '?';
 
         $links = paginate_links( array(
@@ -983,6 +1228,12 @@ class ADN_Productos_Plugin {
             'permission_callback' => $auth,
         ] );
 
+        register_rest_route( $ns, '/ingest-customers', [
+            'methods'             => WP_REST_Server::CREATABLE,
+            'callback'            => [ $this, 'handle_ingest_customers' ],
+            'permission_callback' => $auth,
+        ] );
+
         register_rest_route( $ns, '/set-key', [
             'methods'             => WP_REST_Server::CREATABLE,
             'callback'            => [ $this, 'handle_set_key' ],
@@ -1003,8 +1254,9 @@ class ADN_Productos_Plugin {
             return new WP_REST_Response( [ 'error' => 'WooCommerce no activo' ], 500 );
         }
 
-        $body     = $request->get_json_params();
-        $products = $body['products'] ?? [];
+        $body       = $request->get_json_params();
+        $products   = $body['products'] ?? [];
+        $only_stock = ! empty( $body['only_stock'] );
         if ( empty( $products ) || ! is_array( $products ) ) {
             return new WP_REST_Response( [ 'error' => 'Falta el campo products (array)' ], 400 );
         }
@@ -1046,7 +1298,23 @@ class ADN_Productos_Plugin {
                 continue;
             }
 
-            $product->set_name( $name );
+            if ( $only_stock ) {
+                // Modo existencias: solo actualizar stock en productos ya existentes
+                if ( $is_new ) { $errors++; continue; }
+                $product->set_manage_stock( true );
+                $product->set_stock_quantity( $stock );
+                $product->set_stock_status( $stock > 0 ? 'instock' : 'outofstock' );
+                $saved_id = $product->save();
+                if ( ! $saved_id || is_wp_error( $saved_id ) ) { $errors++; continue; }
+                $updated++;
+                continue;
+            }
+
+            if ( ! empty( $name ) && $name !== $sku ) {
+                $product->set_name( $name );
+            } elseif ( $is_new ) {
+                $product->set_name( $sku );
+            }
             $product->set_status( $status );
             if ( $price > 0 ) {
                 $product->set_regular_price( $price );
@@ -1353,8 +1621,9 @@ class ADN_Productos_Plugin {
             return new WP_REST_Response( [ 'error' => 'WooCommerce no activo' ], 500 );
         }
 
-        $limit   = min( 100, max( 1, (int) ( $request->get_param( 'limit' ) ?? 50 ) ) );
-        $status  = sanitize_text_field( $request->get_param( 'status' ) ?? 'processing' );
+        $limit        = min( 100, max( 1, (int) ( $request->get_param( 'limit' ) ?? 50 ) ) );
+        $status_raw   = sanitize_text_field( $request->get_param( 'status' ) ?? 'processing,on-hold' );
+        $status       = array_map( 'trim', explode( ',', $status_raw ) );
         $only_pending = filter_var( $request->get_param( 'only_pending' ) ?? true, FILTER_VALIDATE_BOOLEAN );
 
         $orders = wc_get_orders( [
@@ -1370,31 +1639,40 @@ class ADN_Productos_Plugin {
 
             $items = [];
             foreach ( $order->get_items() as $item ) {
-                $product = $item->get_product();
+                $product   = $item->get_product();
+                $qty       = (float) $item->get_quantity();
+                $subtotal  = (float) $item->get_subtotal();
                 $items[] = [
-                    'sku'      => $product ? $product->get_sku() : '',
-                    'name'     => $item->get_name(),
-                    'qty'      => (int) $item->get_quantity(),
-                    'subtotal' => (float) $item->get_subtotal(),
-                    'total'    => (float) $item->get_total(),
+                    'sku'        => $product ? $product->get_sku() : '',
+                    'name'       => $item->get_name(),
+                    'qty'        => $qty,
+                    'unit_price' => $qty > 0 ? round( $subtotal / $qty, 4 ) : 0,
+                    'subtotal'   => $subtotal,
+                    'total'      => (float) $item->get_total(),
                 ];
             }
 
+            $user_id      = $order->get_user_id();
+            $adn_code     = $user_id ? get_user_meta( $user_id, '_adn_cli_codigo', true ) : '';
+
             $result[] = [
-                'order_id'       => $order->get_id(),
-                'order_number'   => $order->get_order_number(),
-                'date'           => $order->get_date_created() ? $order->get_date_created()->format( 'Y-m-d H:i:s' ) : '',
-                'status'         => $order->get_status(),
-                'total'          => (float) $order->get_total(),
-                'currency'       => $order->get_currency(),
-                'customer_name'  => trim( $order->get_billing_first_name() . ' ' . $order->get_billing_last_name() ),
-                'customer_email' => $order->get_billing_email(),
-                'customer_phone' => $order->get_billing_phone(),
-                'address'        => $order->get_billing_address_1(),
-                'address2'       => $order->get_billing_address_2(),
-                'city'           => $order->get_billing_city(),
-                'note'           => $order->get_customer_note(),
-                'items'          => $items,
+                'order_id'          => $order->get_id(),
+                'order_number'      => $order->get_order_number(),
+                'date'              => $order->get_date_created() ? $order->get_date_created()->format( 'Y-m-d H:i:s' ) : '',
+                'status'            => $order->get_status(),
+                'total'             => (float) $order->get_total(),
+                'currency'          => $order->get_currency(),
+                'customer_name'       => trim( $order->get_billing_first_name() . ' ' . $order->get_billing_last_name() ),
+                'customer_first_name' => $order->get_billing_first_name(),
+                'customer_last_name'  => $order->get_billing_last_name(),
+                'customer_email'      => $order->get_billing_email(),
+                'customer_phone'      => $order->get_billing_phone(),
+                'customer_adn_code' => (string) $adn_code,
+                'address'           => $order->get_billing_address_1(),
+                'address2'          => $order->get_billing_address_2(),
+                'city'              => $order->get_billing_city(),
+                'note'              => $order->get_customer_note(),
+                'items'             => $items,
             ];
         }
 
@@ -1447,7 +1725,162 @@ class ADN_Productos_Plugin {
         ], 200 );
     }
 
-    // ─── Endpoint: Estado de la sincronización ───────────────────────────────
+    // ─── Endpoint: Ingestar clientes ADN como usuarios WooCommerce ─────────────────
+
+    public function handle_ingest_customers( WP_REST_Request $request ): WP_REST_Response {
+        $body      = $request->get_json_params();
+        $customers = $body['customers'] ?? [];
+        if ( empty( $customers ) || ! is_array( $customers ) ) {
+            return new WP_REST_Response( [ 'error' => 'Falta el campo customers (array)' ], 400 );
+        }
+
+        $created = 0;
+        $updated = 0;
+        $errors  = 0;
+
+        foreach ( $customers as $item ) {
+            $codigo       = sanitize_text_field( trim( $item['codigo']        ?? '' ) );
+            $nombre       = sanitize_text_field( trim( $item['nombre']        ?? '' ) );
+            $email_raw    = sanitize_email( trim( $item['email']         ?? '' ) );
+            $telefono     = sanitize_text_field( trim( $item['telefono']      ?? '' ) );
+            $direccion    = sanitize_text_field( trim( $item['direccion']     ?? '' ) );
+            $rif          = sanitize_text_field( trim( $item['rif']           ?? '' ) );
+            $ciudad       = sanitize_text_field( trim( $item['ciudad']        ?? '' ) );
+            $codigo_postal= sanitize_text_field( trim( $item['codigo_postal'] ?? '' ) );
+            $clave_adn    = trim( $item['clave_adn'] ?? '' );
+            // Nombre/apellido compuestos vienen separados desde ADN
+            $first_name_adn = sanitize_text_field( trim( $item['primer_nombre'] ?? '' ) );
+            $last_name_adn  = sanitize_text_field( trim( $item['apellido']      ?? '' ) );
+
+            if ( empty( $codigo ) ) {
+                $errors++;
+                continue;
+            }
+
+            // RIF sin guiones: mayúsculas para username/password, minúsculas para email
+            $rif_upper = strtoupper( str_replace( '-', '', $rif ) );
+            $rif_upper = ! empty( $rif_upper ) ? $rif_upper : strtoupper( $codigo );
+            $rif_clean = strtolower( $rif_upper ); // solo para email
+
+            // Email: usar el real de ADN solo si no es un fallback @correo.com (ej: 0000001@correo.com)
+            // Los emails @correo.com en ADN son generados, no reales — usamos rif@correo.com
+            $email_is_real = ! empty( $email_raw ) &&
+                             strtolower( substr( $email_raw, -11 ) ) !== '@correo.com';
+            $email = $email_is_real ? $email_raw : ( $rif_clean . '@correo.com' );
+
+            // Usar nombres separados de ADN; si vacíos, partir del nombre completo
+            if ( ! empty( $first_name_adn ) || ! empty( $last_name_adn ) ) {
+                $first_name = $first_name_adn;
+                $last_name  = $last_name_adn;
+            } else {
+                $parts      = explode( ' ', $nombre, 2 );
+                $first_name = $parts[0];
+                $last_name  = $parts[1] ?? '';
+            }
+
+            // Buscar usuario existente por meta ADN o por email
+            $existing_id = null;
+            $by_meta = get_users( [
+                'meta_key'   => '_adn_cli_codigo',
+                'meta_value' => $codigo,
+                'number'     => 1,
+                'fields'     => 'ID',
+            ] );
+            if ( ! empty( $by_meta ) ) {
+                $existing_id = (int) $by_meta[0];
+            } elseif ( ! empty( $email_raw ) ) {
+                $by_email = get_user_by( 'email', $email_raw );
+                if ( $by_email ) { $existing_id = $by_email->ID; }
+            }
+
+            if ( $existing_id ) {
+                // Actualizar datos del usuario existente
+                $result = wp_update_user( [
+                    'ID'           => $existing_id,
+                    'first_name'   => $first_name,
+                    'last_name'    => $last_name,
+                    'user_email'   => $email,
+                    'display_name' => ! empty( $rif ) ? $rif : $nombre,
+                    'nickname'     => $codigo,
+                ] );
+                if ( is_wp_error( $result ) ) {
+                    $errors++;
+                    $this->adn_log( 'customers', 'ERROR update ' . $codigo . ': ' . $result->get_error_message() );
+                    continue;
+                }
+                $user_id = $existing_id;
+                $updated++;
+            } else {
+                // Crear usuario nuevo
+                // Username = RIF sin guiones en MAYÚSCULAS (ej: C410413840)
+                $username = $this->unique_username( $rif_upper );
+                // Contraseña = RIF sin guiones en MAYÚSCULAS
+                $password = ! empty( $rif_upper ) ? $rif_upper : strtoupper( $codigo );
+
+                $result = wp_insert_user( [
+                    'user_login'   => $username,
+                    'user_email'   => $email,
+                    'user_pass'    => $password,
+                    'first_name'   => $first_name,
+                    'last_name'    => $last_name,
+                    'role'         => 'customer',
+                    'display_name' => ! empty( $rif ) ? $rif : $nombre,
+                    'nickname'     => $codigo,
+                ] );
+                if ( is_wp_error( $result ) ) {
+                    $errors++;
+                    $this->adn_log( 'customers', 'ERROR create ' . $codigo . ': ' . $result->get_error_message() );
+                    continue;
+                }
+                $user_id = $result;
+                $created++;
+            }
+
+            // Meta ADN y billing WooCommerce
+            update_user_meta( $user_id, '_adn_cli_codigo',          $codigo );
+            update_user_meta( $user_id, '_adn_cli_rif',             $rif );
+            update_user_meta( $user_id, 'billing_first_name',       ! empty( $rif_upper ) ? $rif_upper : $first_name );
+            update_user_meta( $user_id, 'billing_last_name',        $nombre );
+            update_user_meta( $user_id, 'billing_company',          $nombre );
+            update_user_meta( $user_id, 'billing_email',            $email );
+            update_user_meta( $user_id, 'billing_phone',            $telefono );
+            update_user_meta( $user_id, 'billing_address_1',        $direccion );
+            update_user_meta( $user_id, 'billing_city',             $ciudad );
+            update_user_meta( $user_id, 'billing_postcode',         $codigo_postal );
+
+            $this->adn_log( 'customers', ( $existing_id ? 'UPDATE' : 'CREATE' ) . ' ' . $codigo . ' ' . $nombre );
+        }
+
+        update_option( 'adn_loro_last_sync', date( 'Y-m-d H:i:s' ) );
+
+        return new WP_REST_Response( [
+            'created' => $created,
+            'updated' => $updated,
+            'errors'  => $errors,
+            'total'   => $created + $updated + $errors,
+        ], 200 );
+    }
+
+    private function normalize_username( string $name ): string {
+        $clean = remove_accents( $name );           // quitar tildes
+        $clean = strtolower( $clean );              // minúsculas
+        $clean = str_replace( ' ', '.', $clean );   // espacios → puntos
+        $clean = preg_replace( '/[^a-z0-9.\_\-]/', '', $clean ); // solo chars válidos
+        $clean = trim( $clean, '.-_' );
+        return ! empty( $clean ) ? $clean : 'cliente';
+    }
+
+    private function unique_username( string $base ): string {
+        $username = $base;
+        $i = 1;
+        while ( username_exists( $username ) ) {
+            $username = $base . $i;
+            $i++;
+        }
+        return $username;
+    }
+
+    // ─── Endpoint: Estado de la sincronización ────────────────────────────────────────
 
     public function handle_status( WP_REST_Request $request ): WP_REST_Response {
         $pending_images = count( get_option( 'adn_loro_pending_images', [] ) );
@@ -1479,3 +1912,42 @@ class ADN_Productos_Plugin {
 add_action( 'plugins_loaded', function () {
     new ADN_Productos_Plugin();
 } );
+
+/**
+ * Widget: Filtro de Marcas ADN
+ * Aparece en Apariencia → Widgets como "ADN - Filtro por Marcas".
+ */
+class ADN_Marcas_Filter_Widget extends WP_Widget {
+
+    public function __construct() {
+        parent::__construct(
+            'adn_marcas_filter',
+            __( 'ADN - Filtro por Marcas', 'adn-productos' ),
+            array( 'description' => __( 'Lista de marcas con checkboxes para filtrar productos ADN por AJAX.', 'adn-productos' ) )
+        );
+    }
+
+    public function widget( $args, $instance ) {
+        $title = apply_filters( 'widget_title', $instance['title'] ?? __( 'Marcas', 'adn-productos' ) );
+        echo $args['before_widget'];
+        if ( ! empty( $title ) ) {
+            echo $args['before_title'] . esc_html( $title ) . $args['after_title'];
+        }
+        echo do_shortcode( '[adn_filtro_marcas]' );
+        echo $args['after_widget'];
+    }
+
+    public function form( $instance ) {
+        $title = $instance['title'] ?? __( 'Marcas', 'adn-productos' );
+        ?>
+        <p>
+            <label for="<?php echo esc_attr( $this->get_field_id( 'title' ) ); ?>"><?php esc_html_e( 'Título:', 'adn-productos' ); ?></label>
+            <input class="widefat" id="<?php echo esc_attr( $this->get_field_id( 'title' ) ); ?>" name="<?php echo esc_attr( $this->get_field_name( 'title' ) ); ?>" type="text" value="<?php echo esc_attr( $title ); ?>">
+        </p>
+        <?php
+    }
+
+    public function update( $new_instance, $old_instance ) {
+        return array( 'title' => sanitize_text_field( $new_instance['title'] ?? '' ) );
+    }
+}

@@ -5,7 +5,9 @@
     var refreshTimer = null;
 
     // ── Estado de filtros BeRocket (se actualiza cuando BeRocket dispara) ───────
-    var adnBerocketState = { tax_filters: {}, tax_term_ids: {}, min_price: '', max_price: '' };
+    var adnBerocketState   = { tax_filters: {}, tax_term_ids: {}, min_price: '', max_price: '' };
+    var adnIsUpdating      = false;
+    var adnProductObserver = null;
 
     function adnParseBeRocketFilters(filterStr, result) {
         // BeRocket usa: product_cat[71 134] o product_cat[76-92] o product_cat[71]product_cat[134]
@@ -84,6 +86,10 @@
         // Enviar el query string completo para que PHP lo parsee directamente
         var locationSearch = window.location.search || '';
 
+        var adnPaged  = parseInt( new URLSearchParams( window.location.search ).get('adn_paged') || '1', 10 );
+        var brandVal  = $('#adn-brand-select').val() || '';
+        var brandTax  = $('.adn-productos-wrapper').data('brand-tax') || 'product_brand';
+
         var data = {
             action:          'adn_filter_products',
             nonce:           adnAjax.nonce,
@@ -94,8 +100,30 @@
             tax_filters:     {},
             tax_term_ids:    {},
             raw_filters:     rawFilters,
-            location_search: locationSearch
+            location_search: locationSearch,
+            location_href:   window.location.href,
+            adn_paged:       adnPaged
         };
+
+        // Checkboxes del widget de marcas
+        $('.adn-marca-check:checked').each(function () {
+            var cbTax  = $(this).data('taxonomy') || brandTax;
+            var cbSlug = $(this).data('slug') || $(this).val();
+            if (cbTax && cbSlug) {
+                if (!data.tax_filters[cbTax]) { data.tax_filters[cbTax] = []; }
+                if (data.tax_filters[cbTax].indexOf(cbSlug) === -1) {
+                    data.tax_filters[cbTax].push(cbSlug);
+                }
+            }
+        });
+
+        // Filtro de marca del select propio
+        if (brandVal && brandTax) {
+            if (!data.tax_filters[brandTax]) { data.tax_filters[brandTax] = []; }
+            if (data.tax_filters[brandTax].indexOf(brandVal) === -1) {
+                data.tax_filters[brandTax].push(brandVal);
+            }
+        }
 
         // 1. Filtros desde URL (BeRocket con modo URL)
         var urlFilters = adnReadUrlFilters();
@@ -154,6 +182,9 @@
         newUrl.searchParams.delete('adn_paged');
         history.pushState({}, '', newUrl.toString());
 
+        adnIsUpdating = true;
+        // Desconectar observer para que nuestros cambios DOM no disparen el loop
+        if ( adnProductObserver ) { adnProductObserver.disconnect(); }
         $wrapper.addClass('adn-cargando');
 
         $.post(adnAjax.url, data, function (response) {
@@ -172,8 +203,19 @@
                 $wrapper.find('.adn-resultado-count').text(label);
                 $(document.body).trigger('wc_fragment_refresh');
             }
+            adnIsUpdating = false;
+            // Reconectar observer después de que todos los cambios DOM terminaron
+            var obsEl = document.querySelector('.adn-productos-wrapper');
+            if ( adnProductObserver && obsEl ) {
+                adnProductObserver.observe( obsEl, { childList: true, subtree: true } );
+            }
         }).fail(function () {
+            adnIsUpdating = false;
             $wrapper.removeClass('adn-cargando');
+            var obsEl = document.querySelector('.adn-productos-wrapper');
+            if ( adnProductObserver && obsEl ) {
+                adnProductObserver.observe( obsEl, { childList: true, subtree: true } );
+            }
         });
     }
 
@@ -203,7 +245,7 @@
             adnOnBeRocketDone
         );
 
-        // Detector por $.ajaxComplete (más confiable: intercepta cualquier AJAX de BeRocket)
+        // Detector por $.ajaxComplete (para BeRocket con jQuery AJAX)
         $(document).ajaxComplete(function (event, xhr, settings) {
             if ( !settings || !settings.data ) { return; }
             var d = typeof settings.data === 'string' ? settings.data : '';
@@ -211,6 +253,24 @@
                 adnOnBeRocketDone();
             }
         });
+
+        // MutationObserver: detecta cuando BeRocket modifica el grid (fetch nativo, sin jQuery AJAX)
+        // subtree:true para capturar cambios dentro de ul.products (li items)
+        var $obs = $('.adn-productos-wrapper');
+        if ( $obs.length && window.MutationObserver ) {
+            adnProductObserver = new MutationObserver(function (mutations) {
+                // Guard: ignorar si somos nosotros los que estamos modificando el DOM
+                if ( adnIsUpdating ) { return; }
+                for ( var i = 0; i < mutations.length; i++ ) {
+                    if ( mutations[i].type === 'childList' &&
+                         ( mutations[i].addedNodes.length || mutations[i].removedNodes.length ) ) {
+                        adnOnBeRocketDone();
+                        return;
+                    }
+                }
+            });
+            adnProductObserver.observe( $obs[0], { childList: true, subtree: true } );
+        }
 
         // Búsqueda por nombre con debounce de 500ms al escribir
         $(document).on('input', '#adn-search-input', function () {
@@ -229,6 +289,34 @@
 
         // Ordenamiento inmediato al cambiar el select
         $(document).on('change', '#adn-orderby-select', function () {
+            adnFetchProducts();
+        });
+
+        // Filtro de marca (select de barra)
+        $(document).on('change', '#adn-brand-select', function () {
+            var newUrl = new URL(window.location.href);
+            newUrl.searchParams.delete('adn_paged');
+            history.pushState({}, '', newUrl.toString());
+            adnFetchProducts();
+        });
+
+        // Filtro de marca (checkboxes del widget)
+        $(document).on('change', '.adn-marca-check', function () {
+            var newUrl = new URL(window.location.href);
+            newUrl.searchParams.delete('adn_paged');
+            history.pushState({}, '', newUrl.toString());
+            adnFetchProducts();
+        });
+
+        // Paginación AJAX: interceptar clicks en los links de página
+        $(document).on('click', '.adn-pagination a', function (e) {
+            e.preventDefault();
+            var href = $(this).attr('href') || '';
+            var pageMatch = href.match(/[?&]adn_paged=(\d+)/);
+            var page = pageMatch ? pageMatch[1] : '1';
+            var newUrl = new URL( window.location.href );
+            newUrl.searchParams.set( 'adn_paged', page );
+            history.pushState( {}, '', newUrl.toString() );
             adnFetchProducts();
         });
     });

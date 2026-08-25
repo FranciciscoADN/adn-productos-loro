@@ -639,14 +639,102 @@ ul.products.adn-productos-grid li.adn-producto-item {
     outline: none;
 }
 
+.adn-filtro-marca .adn-brand-select {
+    padding: 10px 36px 10px 14px;
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 8px !important;
+    font-size: 14px !important;
+    background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") no-repeat right 12px center !important;
+    appearance: none;
+    -webkit-appearance: none;
+    cursor: pointer;
+    color: #1e293b !important;
+    box-shadow: none !important;
+    transition: border-color 0.2s ease;
+    min-width: 180px;
+}
+
+.adn-filtro-marca .adn-brand-select:focus {
+    border-color: #6366f1 !important;
+    outline: none;
+}
+
 @media (max-width: 540px) {
     .adn-filtros-bar {
         flex-direction: column;
         align-items: stretch;
     }
-    .adn-filtro-orden .adn-orderby-select {
+    .adn-filtro-orden .adn-orderby-select,
+    .adn-filtro-marca .adn-brand-select {
         width: 100%;
     }
+}
+
+/* ── Widget / Shortcode: Filtro de Marcas (mismo estilo que BeRocket categorías) ── */
+.adn-marcas-titulo {
+    font-size: 0.9em;
+    font-weight: 700;
+    color: inherit;
+    margin: 0 0 8px !important;
+    padding: 0 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.adn-marcas-filter-list {
+    list-style: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+.adn-marca-item {
+    margin: 0 !important;
+    padding: 0 !important;
+    list-style: none !important;
+}
+
+.adn-marca-item label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    font-size: 0.9em;
+    font-weight: 400;
+    color: inherit;
+    line-height: 1.8;
+    padding: 0;
+    margin: 0;
+    transition: color 0.15s ease;
+}
+
+.adn-marca-item label:hover {
+    color: #2271b1;
+}
+
+.adn-marca-check {
+    width: 13px;
+    height: 13px;
+    min-width: 13px;
+    margin: 0;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.adn-marca-nombre {
+    flex: 1;
+    word-break: break-word;
+}
+
+.adn-marca-count {
+    color: inherit;
+    opacity: 0.6;
+    font-size: 0.9em;
+    white-space: nowrap;
+    margin-left: 2px;
+}
+
+.adn-marca-item input.adn-marca-check:checked ~ .adn-marca-nombre {
+    color: #2271b1;
 }
 
 /* ── Páginas de categoría / tienda (loop nativo WooCommerce) ── */
