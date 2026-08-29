@@ -2,6 +2,7 @@
 .SYNOPSIS
     Registra las tareas programadas de sincronización ADN <-> WordPress El Loro.
     Ejecutar como Administrador en el servidor ADN.
+    Requiere run-sincro.ps1 en la misma carpeta.
 
     TAREAS:
       ADN-Loro-Catalogo    : marcas + categorias + productos + clientes  (cada 2h, 06:00-20:00)
@@ -12,7 +13,7 @@
 #>
 
 $ps_exe   = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
-$script   = "C:\ADN Software\sincro\sincro-adn-loro.ps1"
+$wrapper  = "C:\ADN Software\sincro\run-sincro.ps1"
 $log_dir  = "C:\ADN Software\sincro\logs"
 $work_dir = "C:\ADN Software\sincro"
 
@@ -20,24 +21,15 @@ $work_dir = "C:\ADN Software\sincro"
 New-Item -ItemType Directory -Force -Path $log_dir | Out-Null
 Write-Host "Directorio de logs: $log_dir" -ForegroundColor Cyan
 
-# ─── Funcion auxiliar para construir argumento con log fechado ────────────────
-# Cada ejecucion crea: logs\<modo>_YYYY-MM-DD_HH-mm.log
-function Build-Arg {
-    param([string]$Modo, [string]$ExtraModosCmd = "")
-
-    # Log con fecha+hora para identificar cada ejecucion
-    $log_path = "$log_dir\$Modo`_`$(Get-Date -Format 'yyyy-MM-dd_HH-mm').log"
-
-    if ($ExtraModosCmd) {
-        # Varios modos en secuencia (catalogo)
-        return "-ExecutionPolicy Bypass -NonInteractive -WindowStyle Hidden -Command " +
-               "& { `$log = '$log_dir\catalogo_' + (Get-Date -Format 'yyyy-MM-dd_HH-mm') + '.log'; " +
-               $ExtraModosCmd + " } *>> `$log"
-    } else {
-        return "-ExecutionPolicy Bypass -NonInteractive -WindowStyle Hidden " +
-               "-File `"$script`" -Modo $Modo " +
-               "-LogFile `"$log_dir\$Modo`_`$(Get-Date -Format 'yyyy-MM-dd_HH-mm').log`""
-    }
+# ─── Funcion auxiliar: construye accion de tarea usando run-sincro.ps1 ────────
+# Usa -File para evitar problemas de quoting con rutas con espacios
+function New-SincroAction {
+    param([string]$Modo)
+    $prefix = "$log_dir\${Modo}_"
+    return New-ScheduledTaskAction `
+        -Execute  $ps_exe `
+        -Argument "-ExecutionPolicy Bypass -NonInteractive -WindowStyle Hidden -File `"$wrapper`" -Modo $Modo -LogPrefix `"$prefix`"" `
+        -WorkingDirectory $work_dir
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -45,17 +37,7 @@ function Build-Arg {
 #   Sincroniza: marcas, categorias, productos, clientes
 #   Frecuencia: cada 2 horas de 06:00 a 20:00
 # ─────────────────────────────────────────────────────────────────────────────
-$cat_cmd = "& `"$script`" -Modo marcas -LogFile `$log; " +
-           "& `"$script`" -Modo categorias -LogFile `$log; " +
-           "& `"$script`" -Modo productos -LogFile `$log; " +
-           "& `"$script`" -Modo clientes -LogFile `$log"
-
-$cat_inner = "`$log = '$log_dir\catalogo_' + (Get-Date -Format 'yyyy-MM-dd_HH-mm') + '.log'; $cat_cmd"
-
-$action_cat = New-ScheduledTaskAction `
-    -Execute  $ps_exe `
-    -Argument "-ExecutionPolicy Bypass -NonInteractive -WindowStyle Hidden -Command `"& { $cat_inner }`"" `
-    -WorkingDirectory $work_dir
+$action_cat = New-SincroAction -Modo "catalogo"
 
 $trigger_cat = @(
     (New-ScheduledTaskTrigger -Daily -At "06:00"),
@@ -89,12 +71,7 @@ Write-Host "[OK] ADN-Loro-Catalogo      -> cada 2h de 06:00 a 20:00  | logs\cata
 #   Sincroniza: solo stock de productos (rapido, frecuente)
 #   Frecuencia: cada 1 hora de 06:00 a 22:00
 # ─────────────────────────────────────────────────────────────────────────────
-$ext_inner = "`$log = '$log_dir\existencias_' + (Get-Date -Format 'yyyy-MM-dd_HH-mm') + '.log'; & `"$script`" -Modo existencias -LogFile `$log"
-
-$action_ext = New-ScheduledTaskAction `
-    -Execute  $ps_exe `
-    -Argument "-ExecutionPolicy Bypass -NonInteractive -WindowStyle Hidden -Command `"& { $ext_inner }`"" `
-    -WorkingDirectory $work_dir
+$action_ext = New-SincroAction -Modo "existencias"
 
 $trigger_ext = @(
     (New-ScheduledTaskTrigger -Daily -At "06:00"),
@@ -137,12 +114,7 @@ Write-Host "[OK] ADN-Loro-Existencias   -> cada hora de 06:00 a 22:00 | logs\exi
 #   Sincroniza: imagenes de productos (proceso lento)
 #   Frecuencia: diario a las 23:00
 # ─────────────────────────────────────────────────────────────────────────────
-$img_inner = "`$log = '$log_dir\imagenes_' + (Get-Date -Format 'yyyy-MM-dd_HH-mm') + '.log'; & `"$script`" -Modo imagenes -LogFile `$log"
-
-$action_img = New-ScheduledTaskAction `
-    -Execute  $ps_exe `
-    -Argument "-ExecutionPolicy Bypass -NonInteractive -WindowStyle Hidden -Command `"& { $img_inner }`"" `
-    -WorkingDirectory $work_dir
+$action_img = New-SincroAction -Modo "imagenes"
 
 $trigger_img = New-ScheduledTaskTrigger -Daily -At "23:00"
 
@@ -167,12 +139,7 @@ Write-Host "[OK] ADN-Loro-Imagenes      -> diario 23:00               | logs\ima
 #   Sincroniza: pedidos nuevos de WordPress a ADN, crea clientes si no existen
 #   Frecuencia: cada 30 minutos (todo el dia)
 # ─────────────────────────────────────────────────────────────────────────────
-$ped_inner = "`$log = '$log_dir\pedidos_' + (Get-Date -Format 'yyyy-MM-dd_HH-mm') + '.log'; & `"$script`" -Modo pedidos -LogFile `$log"
-
-$action_ped = New-ScheduledTaskAction `
-    -Execute  $ps_exe `
-    -Argument "-ExecutionPolicy Bypass -NonInteractive -WindowStyle Hidden -Command `"& { $ped_inner }`"" `
-    -WorkingDirectory $work_dir
+$action_ped = New-SincroAction -Modo "pedidos"
 
 $trigger_ped = New-ScheduledTaskTrigger -Once -At (Get-Date "00:00")
 $trigger_ped.Repetition = New-CimInstance `

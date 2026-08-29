@@ -13,7 +13,7 @@
 # ============================================================
 
 param(
-    [ValidateSet("todo","productos","marcas","categorias","imagenes","pedidos","clientes","existencias","status")]
+    [ValidateSet("todo","productos","marcas","categorias","imagenes","pedidos","clientes","existencias","eliminados","pedidos-adn","status")]
     [string]$Modo = "todo",
     [string]$LogFile = ""
 )
@@ -732,23 +732,145 @@ Write-Log "=============================="
 Write-Log "Inicio sincronización — Modo: $Modo"
 Write-Log "=============================="
 
+# ── FUNCIÓN: Archivar productos eliminados/desactivados en ADN ────────────────
+function Sync-ProductosEliminados {
+    Write-Log "=== Sincronizando PRODUCTOS ELIMINADOS ==="
+
+    $sql = @"
+SELECT TRIM(PDT_CODIGO) AS sku
+FROM adn_productos
+WHERE PDT_ESTADO   = 1
+  AND PDT_OCULTO   = 0
+  AND PDT_SUBIRWEB = 1
+  AND TRIM(PDT_CODIGO) <> '';
+"@
+
+    $rows = Run-MySQL $sql
+    if ($null -eq $rows) { Write-Log "Error consultando SKUs activos en ADN."; return }
+
+    $active_skus = @($rows | ForEach-Object { $_.sku.Trim() } | Where-Object { $_ -ne "" })
+    Write-Log "SKUs activos en ADN: $($active_skus.Count)"
+
+    $resp = Invoke-WP "delete-absent-products" "POST" @{ active_skus = $active_skus }
+    if ($resp) {
+        Write-Log "Productos archivados en WP: drafted=$($resp.drafted) errors=$($resp.errors) skipped=$($resp.skipped)"
+    }
+}
+
+# ── FUNCIÓN: Sincronizar documentos de venta ADN → WordPress ─────────────────
+function Sync-PedidosADN {
+    Write-Log "=== Sincronizando DOCUMENTOS DE VENTA ADN → Web ==="
+
+    $sql = @"
+SELECT
+    dc.DCL_TDT_CODIGO                                    AS tipo,
+    TRIM(dc.DCL_NUMERO)                                  AS numero,
+    dc.DCL_FECHAHORA                                     AS fecha,
+    TRIM(dc.DCL_CLT_CODIGO)                              AS cliente_codigo,
+    TRIM(c.CLT_RIF)                                      AS rif,
+    TRIM(COALESCE(c.CLT_EMAILWEB, c.CLT_EMAIL, ''))      AS email,
+    COALESCE(dc.DCL_TOTAL, 0)                            AS total_bs,
+    COALESCE(dc.DCL_TOTALME, 0)                          AS total_usd,
+    TRIM(COALESCE(dc.DCL_ESTADO, ''))                    AS estado,
+    TRIM(COALESCE(mc.MCL_PDT_CODIGO, ''))                AS sku,
+    REPLACE(TRIM(COALESCE(mc.MCL_DESCRIPCION, '')), '"', '') AS descripcion,
+    COALESCE(mc.MCL_CANTIDAD, 0)                         AS cantidad,
+    COALESCE(mc.MCL_PRECIO, 0)                           AS precio,
+    COALESCE(mc.MCL_PRECIOME, 0)                         AS precio_usd
+FROM ADN_DOCCLI dc
+JOIN adn_clientes c  ON dc.DCL_CLT_CODIGO = c.CLT_CODIGO
+JOIN ADN_MOVCLI mc   ON mc.MCL_DCL_NUMERO = dc.DCL_NUMERO
+                     AND mc.MCL_TDT_CODIGO = dc.DCL_TDT_CODIGO
+WHERE dc.DCL_TDT_CODIGO IN ('PEDW','PED','FAC','FACO')
+  AND dc.DCL_FECHAHORA >= DATE_SUB(NOW(), INTERVAL 365 DAY)
+  AND TRIM(c.CLT_RIF) <> ''
+  AND TRIM(c.CLT_RIF) NOT IN ('00000000','0000000-0','INDEFINIDO')
+ORDER BY dc.DCL_CLT_CODIGO, dc.DCL_FECHAHORA DESC;
+"@
+
+    $rows = Run-MySQL $sql
+    if ($null -eq $rows -or $rows.Count -eq 0) {
+        Write-Log "No hay documentos de venta en el último año."
+        return
+    }
+
+    Write-Log "Filas obtenidas: $($rows.Count)"
+
+    # Agrupar líneas por tipo+numero → un documento con array de items
+    $dict = [ordered]@{}
+    foreach ($row in $rows) {
+        $key = "$($row.tipo.Trim())|$($row.numero.Trim())"
+        if (-not $dict.ContainsKey($key)) {
+            $dict[$key] = [PSCustomObject]@{
+                tipo           = $row.tipo.Trim()
+                numero         = $row.numero.Trim()
+                fecha          = $row.fecha.Trim()
+                cliente_codigo = $row.cliente_codigo.Trim()
+                rif            = $row.rif.Trim()
+                email          = $row.email.Trim()
+                total_bs       = [double]($row.total_bs  -replace '[^0-9.]','')
+                total_usd      = [double]($row.total_usd -replace '[^0-9.]','')
+                estado         = $row.estado.Trim()
+                items          = [System.Collections.Generic.List[object]]::new()
+            }
+        }
+        $dict[$key].items.Add([PSCustomObject]@{
+            sku        = $row.sku.Trim()
+            descripcion= $row.descripcion.Trim()
+            cantidad   = [double]($row.cantidad   -replace '[^0-9.]','')
+            precio     = [double]($row.precio     -replace '[^0-9.]','')
+            precio_usd = [double]($row.precio_usd -replace '[^0-9.]','')
+        })
+    }
+
+    $orders = @($dict.Values)
+    Write-Log "Documentos únicos: $($orders.Count)"
+
+    $LOTE_ORD     = 50
+    $lotes        = [Math]::Ceiling($orders.Count / $LOTE_ORD)
+    $total_synced = 0; $total_errors = 0
+
+    for ($i = 0; $i -lt $lotes; $i++) {
+        $inicio = $i * $LOTE_ORD
+        $lote   = $orders | Select-Object -Skip $inicio -First $LOTE_ORD
+        Write-Log "Lote $($i+1)/$lotes — $($lote.Count) documentos..."
+
+        $resp = Invoke-WP "ingest-adn-orders" "POST" @{ orders = $lote }
+        if ($resp) {
+            $total_synced += $resp.synced
+            $total_errors += $resp.errors
+            Write-Log "  → synced=$($resp.synced) errors=$($resp.errors)"
+        } else {
+            Write-Log "  → ERROR: sin respuesta del servidor"
+            $total_errors += $lote.Count
+        }
+        Start-Sleep -Milliseconds 500
+    }
+
+    Write-Log "TOTAL pedidos ADN: synced=$total_synced errors=$total_errors"
+}
+
 switch ($Modo) {
-    "productos"  { Sync-Productos }
-    "marcas"     { Sync-Marcas }
-    "categorias" { Sync-Categorias }
-    "imagenes"   { Sync-Imagenes }
+    "productos"   { Sync-Productos }
+    "marcas"      { Sync-Marcas }
+    "categorias"  { Sync-Categorias }
+    "imagenes"    { Sync-Imagenes }
     "pedidos"     { Sync-PedidosWeb }
     "existencias" { Sync-Existencias }
     "clientes"    { Sync-Clientes }
-    "status"     { Get-Status }
+    "eliminados"  { Sync-ProductosEliminados }
+    "pedidos-adn" { Sync-PedidosADN }
+    "status"      { Get-Status }
     "todo" {
         Get-Status
         Sync-Marcas
         Sync-Categorias
         Sync-Productos
+        Sync-ProductosEliminados
         Sync-Imagenes
         Sync-Clientes
         Sync-PedidosWeb
+        Sync-PedidosADN
     }
 }
 

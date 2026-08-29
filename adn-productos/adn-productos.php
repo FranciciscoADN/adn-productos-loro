@@ -34,9 +34,23 @@ class ADN_Productos_Plugin {
         add_filter( 'berocket_aapf_widget_products_query_args', array( $this, 'capture_berocket_args' ), 10, 1 );
         add_filter( 'berocket_filter_product_query_args',        array( $this, 'capture_berocket_args' ), 10, 1 );
 
+        // Redirigir al home tras login (clientes); admins/editores van al dashboard
+        add_filter( 'login_redirect', array( $this, 'redirect_after_login' ), 10, 3 );
+
+        // Exigir login para carrito y checkout
+        add_action( 'template_redirect', array( $this, 'require_login_for_checkout' ) );
+
         // Sincronización ADN ← → WP
         add_action( 'rest_api_init',                       array( $this, 'register_sync_endpoints' ) );
         add_action( 'woocommerce_order_status_changed',    array( $this, 'enqueue_order_for_adn' ), 10, 4 );
+
+        // Tabla wp_adn_orders (crear si no existe)
+        add_action( 'init', array( $this, 'maybe_create_adn_orders_table' ) );
+
+        // My Account: pestaña "Mis Pedidos ADN"
+        add_action( 'init',                                           array( $this, 'adn_orders_add_endpoint' ) );
+        add_filter( 'woocommerce_account_menu_items',                 array( $this, 'adn_orders_menu_item' ) );
+        add_action( 'woocommerce_account_pedidos-adn_endpoint',       array( $this, 'adn_orders_endpoint_content' ) );
 
         // ADN es la fuente de verdad para stock — WooCommerce NO debe descontar
         add_filter( 'woocommerce_can_reduce_order_stock', '__return_false' );
@@ -108,6 +122,40 @@ class ADN_Productos_Plugin {
     public function make_postcode_optional( $fields ) {
         $fields['postcode']['required'] = false;
         return $fields;
+    }
+
+    public function require_login_for_checkout() {
+        if ( is_user_logged_in() ) {
+            return;
+        }
+        if ( is_checkout() || is_cart() ) {
+            $checkout_url = wc_get_checkout_url();
+            $login_url    = wc_get_page_permalink( 'myaccount' );
+            wp_safe_redirect( add_query_arg( 'redirect_to', rawurlencode( $checkout_url ), $login_url ) );
+            exit;
+        }
+    }
+
+    public function redirect_after_login( $redirect_to, $requested_redirect_to, $user ) {
+        if ( is_wp_error( $user ) ) {
+            return $redirect_to;
+        }
+        $admin_roles = array( 'administrator', 'editor', 'shop_manager' );
+        foreach ( $admin_roles as $role ) {
+            if ( in_array( $role, (array) $user->roles, true ) ) {
+                return $redirect_to; // dashboard por defecto
+            }
+        }
+        // Si venía del checkout/carrito, volver ahí
+        if ( ! empty( $requested_redirect_to ) ) {
+            $checkout_url = wc_get_checkout_url();
+            $cart_url     = wc_get_cart_url();
+            if ( strpos( $requested_redirect_to, $checkout_url ) !== false ||
+                 strpos( $requested_redirect_to, $cart_url ) !== false ) {
+                return $requested_redirect_to;
+            }
+        }
+        return home_url( '/' );
     }
 
     public function set_shop_columns( $columns ) {
@@ -1234,6 +1282,18 @@ class ADN_Productos_Plugin {
             'permission_callback' => $auth,
         ] );
 
+        register_rest_route( $ns, '/delete-absent-products', [
+            'methods'             => WP_REST_Server::CREATABLE,
+            'callback'            => [ $this, 'handle_delete_absent_products' ],
+            'permission_callback' => $auth,
+        ] );
+
+        register_rest_route( $ns, '/ingest-adn-orders', [
+            'methods'             => WP_REST_Server::CREATABLE,
+            'callback'            => [ $this, 'handle_ingest_adn_orders' ],
+            'permission_callback' => $auth,
+        ] );
+
         register_rest_route( $ns, '/set-key', [
             'methods'             => WP_REST_Server::CREATABLE,
             'callback'            => [ $this, 'handle_set_key' ],
@@ -1906,6 +1966,272 @@ class ADN_Productos_Plugin {
             $queue[] = $order_id;
             update_option( 'adn_loro_order_queue', $queue, false );
         }
+    }
+
+    // ─── Tabla wp_adn_orders ──────────────────────────────────────────────────
+
+    public function maybe_create_adn_orders_table(): void {
+        global $wpdb;
+        $table   = $wpdb->prefix . 'adn_orders';
+        $version = get_option( 'adn_orders_table_version', 0 );
+        if ( (int) $version >= 1 ) {
+            return;
+        }
+        $charset = $wpdb->get_charset_collate();
+        $sql = "CREATE TABLE IF NOT EXISTS `{$table}` (
+            `id`             BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            `adn_tipo`       VARCHAR(10)     NOT NULL,
+            `adn_numero`     VARCHAR(20)     NOT NULL,
+            `adn_rif`        VARCHAR(30)     NOT NULL DEFAULT '',
+            `adn_email`      VARCHAR(100)    NOT NULL DEFAULT '',
+            `cliente_codigo` VARCHAR(20)     NOT NULL DEFAULT '',
+            `fecha`          DATETIME        NOT NULL,
+            `estado`         VARCHAR(30)     NOT NULL DEFAULT '',
+            `total_bs`       DECIMAL(15,2)   NOT NULL DEFAULT 0.00,
+            `total_usd`      DECIMAL(15,2)   NOT NULL DEFAULT 0.00,
+            `items_json`     LONGTEXT        NOT NULL,
+            `synced_at`      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `adn_doc` (`adn_tipo`, `adn_numero`),
+            KEY `idx_rif`   (`adn_rif`),
+            KEY `idx_fecha` (`fecha`)
+        ) {$charset};";
+        require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+        dbDelta( $sql );
+        update_option( 'adn_orders_table_version', 1 );
+    }
+
+    // ─── Endpoint: Archivar productos ausentes en ADN ─────────────────────────
+
+    public function handle_delete_absent_products( WP_REST_Request $request ): WP_REST_Response {
+        if ( ! class_exists( 'WooCommerce' ) ) {
+            return new WP_REST_Response( [ 'error' => 'WooCommerce no activo' ], 500 );
+        }
+
+        $body        = $request->get_json_params();
+        $active_skus = $body['active_skus'] ?? [];
+        if ( ! is_array( $active_skus ) || empty( $active_skus ) ) {
+            return new WP_REST_Response( [ 'error' => 'Falta active_skus (array)' ], 400 );
+        }
+
+        $active_skus = array_map( 'sanitize_text_field', $active_skus );
+
+        // Obtener todos los productos publicados en WooCommerce
+        $wp_products = wc_get_products( [
+            'status' => 'publish',
+            'limit'  => -1,
+            'return' => 'ids',
+        ] );
+
+        $drafted = 0;
+        $skipped = 0;
+        $errors  = 0;
+
+        foreach ( $wp_products as $product_id ) {
+            $sku = get_post_meta( $product_id, '_sku', true );
+            if ( empty( $sku ) ) {
+                $skipped++;
+                continue;
+            }
+            if ( in_array( $sku, $active_skus, true ) ) {
+                $skipped++;
+                continue;
+            }
+            // Producto no está en ADN → archivar como borrador
+            $result = wp_update_post( [
+                'ID'          => $product_id,
+                'post_status' => 'draft',
+            ] );
+            if ( is_wp_error( $result ) || ! $result ) {
+                $errors++;
+            } else {
+                $drafted++;
+                $this->adn_log( 'eliminados', "Archivado SKU={$sku} (ID={$product_id})" );
+            }
+        }
+
+        return new WP_REST_Response( [
+            'drafted' => $drafted,
+            'skipped' => $skipped,
+            'errors'  => $errors,
+        ], 200 );
+    }
+
+    // ─── Endpoint: Ingestar pedidos/facturas ADN ──────────────────────────────
+
+    public function handle_ingest_adn_orders( WP_REST_Request $request ): WP_REST_Response {
+        global $wpdb;
+        $table  = $wpdb->prefix . 'adn_orders';
+        $body   = $request->get_json_params();
+        $orders = $body['orders'] ?? [];
+
+        if ( ! is_array( $orders ) || empty( $orders ) ) {
+            return new WP_REST_Response( [ 'error' => 'Falta orders (array)' ], 400 );
+        }
+
+        $synced = 0;
+        $errors = 0;
+
+        foreach ( $orders as $o ) {
+            $tipo   = sanitize_text_field( $o['tipo']           ?? '' );
+            $numero = sanitize_text_field( $o['numero']         ?? '' );
+            $rif    = sanitize_text_field( $o['rif']            ?? '' );
+            $email  = sanitize_email(      $o['email']          ?? '' );
+            $cod    = sanitize_text_field( $o['cliente_codigo'] ?? '' );
+            $fecha  = sanitize_text_field( $o['fecha']          ?? '' );
+            $estado = sanitize_text_field( $o['estado']         ?? '' );
+            $tbs    = (float) ( $o['total_bs']  ?? 0 );
+            $tusd   = (float) ( $o['total_usd'] ?? 0 );
+            $items  = $o['items'] ?? [];
+
+            if ( empty( $tipo ) || empty( $numero ) || empty( $rif ) ) {
+                $errors++;
+                continue;
+            }
+
+            $items_json = wp_json_encode( $items );
+
+            $result = $wpdb->query( $wpdb->prepare(
+                "INSERT INTO `{$table}`
+                    (adn_tipo, adn_numero, adn_rif, adn_email, cliente_codigo, fecha, estado, total_bs, total_usd, items_json, synced_at)
+                 VALUES (%s, %s, %s, %s, %s, %s, %s, %f, %f, %s, NOW())
+                 ON DUPLICATE KEY UPDATE
+                    adn_rif        = VALUES(adn_rif),
+                    adn_email      = VALUES(adn_email),
+                    fecha          = VALUES(fecha),
+                    estado         = VALUES(estado),
+                    total_bs       = VALUES(total_bs),
+                    total_usd      = VALUES(total_usd),
+                    items_json     = VALUES(items_json),
+                    synced_at      = NOW()",
+                $tipo, $numero, $rif, $email, $cod, $fecha, $estado, $tbs, $tusd, $items_json
+            ) );
+
+            if ( false === $result ) {
+                $errors++;
+            } else {
+                $synced++;
+            }
+        }
+
+        return new WP_REST_Response( [ 'synced' => $synced, 'errors' => $errors ], 200 );
+    }
+
+    // ─── My Account: pestaña "Mis Pedidos ADN" ────────────────────────────────
+
+    public function adn_orders_add_endpoint(): void {
+        add_rewrite_endpoint( 'pedidos-adn', EP_ROOT | EP_PAGES );
+    }
+
+    public function adn_orders_menu_item( array $items ): array {
+        $new = [];
+        foreach ( $items as $key => $label ) {
+            $new[ $key ] = $label;
+            if ( 'orders' === $key ) {
+                $new['pedidos-adn'] = 'Mis Pedidos ADN';
+            }
+        }
+        return $new;
+    }
+
+    public function adn_orders_endpoint_content(): void {
+        global $wpdb;
+
+        if ( ! is_user_logged_in() ) {
+            echo '<p>' . esc_html__( 'Debes iniciar sesión para ver tus pedidos.', 'adn-productos' ) . '</p>';
+            return;
+        }
+
+        $user_id = get_current_user_id();
+        $rif     = get_user_meta( $user_id, '_adn_cli_rif', true );
+
+        if ( empty( $rif ) ) {
+            echo '<p>No tienes un RIF registrado en el sistema ADN. Contacta al administrador.</p>';
+            return;
+        }
+
+        $table  = $wpdb->prefix . 'adn_orders';
+        $orders = $wpdb->get_results( $wpdb->prepare(
+            "SELECT * FROM `{$table}` WHERE adn_rif = %s ORDER BY fecha DESC LIMIT 100",
+            $rif
+        ) );
+
+        if ( empty( $orders ) ) {
+            echo '<p>No se encontraron documentos de venta registrados para tu cuenta (RIF: ' . esc_html( $rif ) . ').</p>';
+            return;
+        }
+
+        $tipo_labels = [
+            'PEDW' => 'Pedido Web',
+            'PED'  => 'Pedido',
+            'FAC'  => 'Factura',
+            'FACO' => 'Factura (Copia)',
+        ];
+
+        ?>
+        <h2>Mis Documentos de Venta ADN</h2>
+        <p style="color:#666;font-size:.9em;">RIF: <?php echo esc_html( $rif ); ?></p>
+
+        <style>
+        .adn-orders-table { width:100%; border-collapse:collapse; font-size:.9em; }
+        .adn-orders-table th { background:#f5f5f5; padding:8px 10px; text-align:left; border-bottom:2px solid #ddd; }
+        .adn-orders-table td { padding:8px 10px; border-bottom:1px solid #eee; vertical-align:top; }
+        .adn-orders-table tr:hover td { background:#fafafa; }
+        .adn-tipo-badge { display:inline-block; padding:2px 7px; border-radius:3px; font-size:.8em; font-weight:600; background:#e8f0fe; color:#1a56db; }
+        .adn-orders-items { font-size:.85em; color:#555; margin:4px 0 0; }
+        .adn-orders-items li { margin:2px 0; }
+        .adn-total { font-weight:600; white-space:nowrap; }
+        details summary { cursor:pointer; color:#0073aa; }
+        </style>
+
+        <table class="adn-orders-table">
+            <thead>
+                <tr>
+                    <th>Nº Documento</th>
+                    <th>Tipo</th>
+                    <th>Fecha</th>
+                    <th>Estado</th>
+                    <th>Total Bs</th>
+                    <th>Total USD</th>
+                    <th>Artículos</th>
+                </tr>
+            </thead>
+            <tbody>
+            <?php foreach ( $orders as $order ) :
+                $items = json_decode( $order->items_json, true ) ?: [];
+                $tipo_label = $tipo_labels[ $order->adn_tipo ] ?? $order->adn_tipo;
+                $fecha_fmt  = date_i18n( 'd/m/Y H:i', strtotime( $order->fecha ) );
+            ?>
+                <tr>
+                    <td><strong><?php echo esc_html( $order->adn_numero ); ?></strong></td>
+                    <td><span class="adn-tipo-badge"><?php echo esc_html( $tipo_label ); ?></span></td>
+                    <td><?php echo esc_html( $fecha_fmt ); ?></td>
+                    <td><?php echo esc_html( $order->estado ?: '—' ); ?></td>
+                    <td class="adn-total"><?php echo number_format( (float) $order->total_bs, 2, ',', '.' ); ?> Bs</td>
+                    <td class="adn-total">$ <?php echo number_format( (float) $order->total_usd, 2, ',', '.' ); ?></td>
+                    <td>
+                        <?php if ( ! empty( $items ) ) : ?>
+                        <details>
+                            <summary><?php echo count( $items ); ?> ítem(s)</summary>
+                            <ul class="adn-orders-items">
+                            <?php foreach ( $items as $item ) : ?>
+                                <li>
+                                    <?php echo esc_html( $item['descripcion'] ?: $item['sku'] ); ?>
+                                    — <?php echo esc_html( number_format( (float) $item['cantidad'], 0 ) ); ?> x
+                                    $<?php echo esc_html( number_format( (float) $item['precio_usd'], 2 ) ); ?>
+                                </li>
+                            <?php endforeach; ?>
+                            </ul>
+                        </details>
+                        <?php else : ?>
+                        —
+                        <?php endif; ?>
+                    </td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+        <?php
     }
 }
 
