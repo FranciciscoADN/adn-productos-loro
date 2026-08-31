@@ -36,9 +36,17 @@
                 result.tax_filters['product_cat'] = value.split(',');
             } else if ( key === 'min_price' || key === 'max_price' ) {
                 result[key] = value;
+            } else if ( key === 'adn_s' ) {
+                result.adn_s = value;
             } else if ( key === 'filters' || key === 'filters[]' ) {
-                // Formato BeRocket: ?filters=product_cat[71]
+                // Formato BeRocket: ?filters=product_cat[71] o price[4_113]
                 adnParseBeRocketFilters(value, result);
+                // Extraer rango de precio del formato price[min_max]
+                var priceMatch = value.match(/price\[(\d+(?:\.\d+)?)_(\d+(?:\.\d+)?)\]/);
+                if (priceMatch) {
+                    result.min_price = priceMatch[1];
+                    result.max_price = priceMatch[2];
+                }
             }
         });
         return result;
@@ -201,10 +209,11 @@
             console.log('[ADN] POST data:', { s: searchVal, rawFilters: rawFilters, filters_json: data.filters_json, min_price: data.min_price, max_price: data.max_price });
         }
 
-        // Actualizar URL silenciosamente
+        // Actualizar URL silenciosamente (adn_s en lugar de s para no triggear búsqueda WP)
         var newUrl = new URL(window.location.href);
-        if (searchVal)  { newUrl.searchParams.set('s', searchVal); }
-        else            { newUrl.searchParams.delete('s'); }
+        if (searchVal)  { newUrl.searchParams.set('adn_s', searchVal); }
+        else            { newUrl.searchParams.delete('adn_s'); }
+        newUrl.searchParams.delete('s');
         if (orderbyVal) { newUrl.searchParams.set('orderby', orderbyVal); }
         else            { newUrl.searchParams.delete('orderby'); }
         newUrl.searchParams.delete('adn_paged');

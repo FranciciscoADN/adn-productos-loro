@@ -589,6 +589,8 @@ class ADN_Productos_Plugin {
         // Búsqueda por texto
         if ( ! empty( $_POST['s'] ) ) {
             $args['s'] = sanitize_text_field( wp_unslash( $_POST['s'] ) );
+        } elseif ( ! empty( $_POST['adn_s'] ) ) {
+            $args['s'] = sanitize_text_field( wp_unslash( $_POST['adn_s'] ) );
         }
 
         // Ordenamiento
@@ -1183,9 +1185,28 @@ class ADN_Productos_Plugin {
             );
         }
 
-        // Búsqueda por texto (?s=zapatilla)
-        if ( ! empty( $_GET['s'] ) ) {
+        // Búsqueda por texto (?adn_s=zapatilla — no activa el motor de búsqueda de WP)
+        if ( ! empty( $_GET['adn_s'] ) ) {
+            $args['s'] = sanitize_text_field( wp_unslash( $_GET['adn_s'] ) );
+        } elseif ( ! empty( $_GET['s'] ) ) {
             $args['s'] = sanitize_text_field( wp_unslash( $_GET['s'] ) );
+        }
+
+        // Rango de precio formato BeRocket: ?filters=price[4_113]
+        if ( ! empty( $_GET['filters'] ) ) {
+            $filters_raw = sanitize_text_field( wp_unslash( $_GET['filters'] ) );
+            if ( preg_match( '/price\[(\d+(?:\.\d+)?)_(\d+(?:\.\d+)?)\]/', $filters_raw, $pm ) ) {
+                $br_min = floatval( $pm[1] );
+                $br_max = floatval( $pm[2] );
+                if ( null === $min_price && null === $max_price ) {
+                    $args['meta_query'][] = array(
+                        'key'     => '_price',
+                        'value'   => array( $br_min, $br_max ),
+                        'compare' => 'BETWEEN',
+                        'type'    => 'NUMERIC',
+                    );
+                }
+            }
         }
 
         return $args;
