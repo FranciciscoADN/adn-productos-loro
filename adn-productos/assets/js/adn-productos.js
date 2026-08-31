@@ -50,7 +50,7 @@
     }
 
     function adnReadDomFilters() {
-        var result = { tax_filters: {}, tax_term_ids: {} };
+        var result = { tax_filters: {}, tax_term_ids: {}, min_price: '', max_price: '' };
         $('[class*="berocket_aapf"], [class*="aapf_widget"], .widget_berocket_aapf_widget')
             .find('input[type="checkbox"]:checked, input[type="radio"]:checked')
             .each(function () {
@@ -61,16 +61,34 @@
                 var slug = $el.data('slug') || $el.data('term');
                 var tid  = $el.data('term_id') || $el.data('term-id');
                 var raw  = String($el.val() || '');
-                // slug explícito
                 if (slug) { adnMergeInto(result.tax_filters, tax, slug); }
-                // term_id explícito
                 if (tid)  { adnMergeInto(result.tax_term_ids, tax, tid); }
-                // valor del input: si es numérico → term_id, si no → slug
                 if (raw && !slug && !tid) {
                     if (/^\d+$/.test(raw)) { adnMergeInto(result.tax_term_ids, tax, raw); }
                     else                   { adnMergeInto(result.tax_filters,  tax, raw); }
                 }
             });
+
+        // Leer precio mínimo/máximo del slider BeRocket desde el DOM
+        var priceSelMin = [
+            'input[name="min_price"]',
+            '.bapf_price_from',
+            '.berocket_price_range_min',
+            '.berocket_min_price_val',
+            '[data-price-type="min"]'
+        ].join(',');
+        var priceSelMax = [
+            'input[name="max_price"]',
+            '.bapf_price_to',
+            '.berocket_price_range_max',
+            '.berocket_max_price_val',
+            '[data-price-type="max"]'
+        ].join(',');
+        var domMinVal = $(priceSelMin).first().val();
+        var domMaxVal = $(priceSelMax).first().val();
+        if (domMinVal !== undefined && domMinVal !== '') { result.min_price = domMinVal; }
+        if (domMaxVal !== undefined && domMaxVal !== '') { result.max_price = domMaxVal; }
+
         return result;
     }
 
@@ -163,6 +181,16 @@
         if (adnBerocketState.min_price && !data.min_price) { data.min_price = adnBerocketState.min_price; }
         if (adnBerocketState.max_price && !data.max_price) { data.max_price = adnBerocketState.max_price; }
 
+        // Lectura directa del DOM como último recurso (BeRocket AJAX puro sin URL)
+        if (!data.min_price) {
+            var $dMin = $('input[name="min_price"], .bapf_price_from, .berocket_price_range_min').first();
+            if ($dMin.length && $dMin.val() !== '') { data.min_price = $dMin.val(); }
+        }
+        if (!data.max_price) {
+            var $dMax = $('input[name="max_price"], .bapf_price_to, .berocket_price_range_max').first();
+            if ($dMax.length && $dMax.val() !== '') { data.max_price = $dMax.val(); }
+        }
+
         // Enviar filtros también como JSON para evitar problemas de serialización
         data.filters_json = JSON.stringify({
             term_ids: data.tax_term_ids,
@@ -170,7 +198,7 @@
         });
 
         if (window.console && window.console.log) {
-            console.log('[ADN] POST data:', { s: searchVal, rawFilters: rawFilters, filters_json: data.filters_json });
+            console.log('[ADN] POST data:', { s: searchVal, rawFilters: rawFilters, filters_json: data.filters_json, min_price: data.min_price, max_price: data.max_price });
         }
 
         // Actualizar URL silenciosamente
@@ -232,8 +260,8 @@
                 adnBerocketState = {
                     tax_filters:  $.extend(true, {}, urlState.tax_filters,  domState.tax_filters),
                     tax_term_ids: $.extend(true, {}, urlState.tax_term_ids, domState.tax_term_ids),
-                    min_price:    urlState.min_price,
-                    max_price:    urlState.max_price
+                    min_price:    urlState.min_price || domState.min_price,
+                    max_price:    urlState.max_price || domState.max_price
                 };
                 adnFetchProducts();
             }, 120);
