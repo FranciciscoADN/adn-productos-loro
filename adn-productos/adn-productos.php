@@ -2452,6 +2452,7 @@ class ADN_Productos_Plugin {
         $youtube      = get_post_meta( $post_id, '_receta_youtube',       true );
         $excerpt      = get_post_field( 'post_excerpt', $post_id );
 
+        // Ingredientes: líneas que terminan en ":" son encabezados de grupo
         $lineas_ingr = $ingredientes
             ? array_values( array_filter( array_map( 'trim', explode( "\n", $ingredientes ) ) ) )
             : [];
@@ -2466,224 +2467,388 @@ class ADN_Productos_Plugin {
         $thumb = get_the_post_thumbnail_url( $post_id, 'large' );
 
         $terminos   = get_the_terms( $post_id, 'categoria_receta' );
-        $categorias = ( $terminos && ! is_wp_error( $terminos ) )
-            ? implode( ' · ', array_map( 'esc_html', wp_list_pluck( $terminos, 'name' ) ) )
-            : '';
+        $cats_list  = ( $terminos && ! is_wp_error( $terminos ) ) ? $terminos : [];
 
-        $dif_tx = [ 'Alta' => '#e74c3c', 'Media' => '#e67e22', 'Baja' => '#27ae60' ];
-        $dif_color = $dif_tx[ $dificultad ] ?? '#555';
+        $author_id   = get_post_field( 'post_author', $post_id );
+        $author_name = get_the_author_meta( 'display_name', $author_id );
+        $author_url  = get_avatar_url( $author_id, [ 'size' => 36 ] );
+        $pub_date    = get_the_date( 'd \d\e F, Y', $post_id );
 
         ob_start();
         ?>
         <style>
-        @media (min-width: 960px) {
+        /* ── Reset columna de contenido ────────────────────────── */
+        @media(min-width:960px) {
             .neve-main > .single-post-container .nv-single-post-wrap.col,
             .neve-main > .container .col {
-                max-width: 100% !important;
-                padding-left: 0 !important;
-                padding-right: 0 !important;
+                max-width: 860px !important;
             }
         }
-        .rf-wrap { font-family: inherit; margin: 0 0 2.5rem; }
+        /* Ocultar título duplicado del tema */
+        .single-receta .entry-header .entry-title,
+        .single-receta h1.title { display:none !important; }
 
-        /* ── HERO ───────────────────────────────────────────────── */
-        .rf-hero {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 0;
-            background: #f4f5f9;
-            margin-bottom: 0;
+        /* ── Wrapper ────────────────────────────────────────────── */
+        .rfd-wrap {
+            font-family: inherit; color: #222;
+            max-width: 860px; margin: 0 auto 3rem;
         }
-        @media(max-width:700px){ .rf-hero { grid-template-columns: 1fr; } }
 
-        .rf-hero-video {
-            position: relative; background: #c5cae9;
-            min-height: 280px;
+        /* ── Título ─────────────────────────────────────────────── */
+        .rfd-title {
+            font-size: 2.4rem; font-weight: 900; line-height: 1.15;
+            margin: 0 0 .75rem; color: #111;
         }
-        .rf-hero-video iframe,
-        .rf-hero-video img {
+
+        /* ── Meta bar (autor / fecha / cats) ────────────────────── */
+        .rfd-meta {
+            display: flex; align-items: center; flex-wrap: wrap;
+            gap: .5rem 1.2rem; font-size: .85rem; color: #777;
+            margin-bottom: 1rem;
+        }
+        .rfd-meta-author {
+            display: flex; align-items: center; gap: .45rem; color: #444;
+        }
+        .rfd-meta-author img {
+            width: 30px; height: 30px; border-radius: 50%;
+            object-fit: cover; border: 2px solid #eee;
+        }
+        .rfd-meta-author span { font-weight: 600; }
+        .rfd-meta-sep { color: #ddd; }
+        .rfd-meta-cat {
+            background: #f0f0f0; padding: 2px 10px; border-radius: 20px;
+            font-size: .78rem; color: #555; text-decoration: none;
+        }
+        .rfd-meta-cat:hover { background: #e84248; color: #fff; }
+
+        /* ── Excerpt ─────────────────────────────────────────────── */
+        .rfd-excerpt {
+            font-size: .97rem; color: #555; line-height: 1.7;
+            margin: 0 0 1.6rem; max-width: 720px;
+        }
+
+        /* ── Hero imagen / video ────────────────────────────────── */
+        .rfd-hero {
+            position: relative; border-radius: 12px;
+            overflow: hidden; background: #1a1a2e;
+            aspect-ratio: 16/9; margin-bottom: 1.6rem;
+        }
+        .rfd-hero img {
+            width: 100%; height: 100%; object-fit: cover; display: block;
+        }
+        .rfd-hero iframe {
             position: absolute; inset: 0;
-            width: 100%; height: 100%;
-            object-fit: cover; border: 0;
+            width: 100%; height: 100%; border: 0;
         }
-        .rf-hero-video .rf-no-media {
+        .rfd-hero-play {
             position: absolute; inset: 0;
             display: flex; align-items: center; justify-content: center;
-            font-size: 4rem; color: #9fa8da;
+            cursor: pointer; background: rgba(0,0,0,.18);
+            transition: background .2s;
+        }
+        .rfd-hero-play:hover { background: rgba(0,0,0,.32); }
+        .rfd-hero-play svg { filter: drop-shadow(0 2px 8px rgba(0,0,0,.4)); }
+        .rfd-hero-no-img {
+            width: 100%; height: 100%; display: flex;
+            align-items: center; justify-content: center;
+            font-size: 5rem; color: #555;
         }
 
-        .rf-hero-info {
-            padding: 2rem 2rem 1.5rem;
-            display: flex; flex-direction: column; justify-content: space-between;
-            background: #f4f5f9;
+        /* ── Barra de stats ──────────────────────────────────────── */
+        .rfd-stats {
+            display: flex; flex-wrap: wrap; gap: 0;
+            border-top: 1px solid #eee; border-bottom: 1px solid #eee;
+            margin-bottom: 2.4rem;
         }
-        .rf-categoria {
-            font-size: .75em; letter-spacing: .12em; text-transform: uppercase;
-            color: #888; margin-bottom: .5rem;
+        .rfd-stat {
+            display: flex; flex-direction: column; align-items: center;
+            padding: .85rem 1.6rem; gap: 2px; flex: 1; min-width: 100px;
+            border-right: 1px solid #eee;
         }
-        .rf-titulo {
-            font-size: 2em; font-weight: 800; line-height: 1.15;
-            margin: 0 0 .5rem; color: #111; text-transform: uppercase;
+        .rfd-stat:last-child { border-right: none; }
+        .rfd-stat-label {
+            font-size: .68rem; text-transform: uppercase;
+            letter-spacing: .1em; color: #aaa; font-weight: 600;
         }
-        .rf-descripcion {
-            font-size: .95em; color: #555; margin: 0 0 1.5rem; line-height: 1.55;
+        .rfd-stat-value {
+            font-size: .95rem; font-weight: 800; color: #111;
+            display: flex; align-items: center; gap: 5px;
         }
+        .rfd-stat-value svg { color: #888; flex-shrink: 0; }
 
-        .rf-meta-row {
+        /* ── Sección 2 columnas: Ingredientes | Instrucciones ───── */
+        .rfd-body {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: .5rem;
-            border-top: 1px solid #dde;
-            padding-top: 1rem; margin-top: auto;
+            grid-template-columns: 1fr 1.7fr;
+            gap: 3rem;
+            align-items: start;
         }
-        @media(max-width:500px){ .rf-meta-row { grid-template-columns: repeat(2, 1fr); } }
-        .rf-meta-item {
-            display: flex; flex-direction: column; align-items: flex-start;
+        @media(max-width:640px) {
+            .rfd-body { grid-template-columns: 1fr; gap: 2rem; }
         }
-        .rf-meta-label {
-            font-size: .7em; letter-spacing: .1em; text-transform: uppercase;
-            color: #999; margin-bottom: 3px;
-        }
-        .rf-meta-value {
-            font-size: .92em; font-weight: 700; color: #222;
-        }
-        .rf-meta-value.dif { }
 
-        /* ── PANELS ─────────────────────────────────────────────── */
-        .rf-panels {
-            display: grid;
-            grid-template-columns: 2fr 3fr;
-            gap: 4px;
-            background: #f4f5f9;
+        /* ── Ingredientes ────────────────────────────────────────── */
+        .rfd-section-title {
+            font-size: 1.4rem; font-weight: 800; color: #111;
+            margin: 0 0 1.1rem; padding-bottom: .5rem;
+            border-bottom: 2px solid #111;
         }
-        @media(max-width:700px){ .rf-panels { grid-template-columns: 1fr; } }
-
-        .rf-panel {
-            background: #3F51B5;
-            color: #fff;
-            padding: 2rem 1.8rem;
-            min-height: 360px;
+        .rfd-ingr-group-title {
+            font-size: .82rem; text-transform: uppercase;
+            letter-spacing: .08em; color: #777; font-weight: 700;
+            margin: 1.1rem 0 .4rem;
         }
-        .rf-panel-title {
-            font-size: .72em; letter-spacing: .15em; text-transform: uppercase;
-            font-weight: 700; color: rgba(255,255,255,.7);
-            margin: 0 0 1.2rem;
-        }
-        .rf-ingr-list {
+        .rfd-ingr-list {
             list-style: none; padding: 0; margin: 0;
         }
-        .rf-ingr-list li {
+        .rfd-ingr-item {
+            display: flex; align-items: flex-start; gap: .7rem;
             padding: .45rem 0;
-            border-bottom: 1px solid rgba(255,255,255,.15);
-            font-size: .92em; line-height: 1.4;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: .93rem; color: #333; line-height: 1.4;
+            cursor: pointer; user-select: none;
+            transition: color .15s;
         }
-        .rf-ingr-list li:last-child { border-bottom: none; }
-
-        .rf-pasos-list {
-            list-style: none; padding: 0; margin: 0; counter-reset: paso;
-        }
-        .rf-pasos-list li {
-            counter-increment: paso;
-            display: flex; gap: .9rem;
-            padding: .65rem 0;
-            border-bottom: 1px solid rgba(255,255,255,.12);
-            font-size: .92em; line-height: 1.5; align-items: flex-start;
-        }
-        .rf-pasos-list li:last-child { border-bottom: none; }
-        .rf-pasos-list li::before {
-            content: counter(paso);
-            flex-shrink: 0;
-            width: 24px; height: 24px;
-            background: rgba(255,255,255,.25);
-            border-radius: 50%;
+        .rfd-ingr-item:last-child { border-bottom: none; }
+        .rfd-ingr-item input[type=checkbox] { display: none; }
+        .rfd-ingr-circle {
+            flex-shrink: 0; width: 18px; height: 18px;
+            border: 2px solid #ccc; border-radius: 50%;
+            margin-top: 2px; transition: background .2s, border-color .2s;
             display: flex; align-items: center; justify-content: center;
-            font-size: .78em; font-weight: 800;
+        }
+        .rfd-ingr-item.checked .rfd-ingr-circle {
+            background: #e84248; border-color: #e84248;
+        }
+        .rfd-ingr-item.checked .rfd-ingr-circle::after {
+            content: '';
+            width: 7px; height: 7px; border-radius: 50%; background: #fff;
+        }
+        .rfd-ingr-item.checked .rfd-ingr-text {
+            text-decoration: line-through; color: #bbb;
+        }
+        .rfd-ingr-text { flex: 1; }
+
+        /* ── Instrucciones ───────────────────────────────────────── */
+        .rfd-steps-list {
+            list-style: none; padding: 0; margin: 0; counter-reset: rfd-step;
+        }
+        .rfd-step {
+            counter-increment: rfd-step;
+            display: flex; gap: 1rem;
+            padding: .9rem 0;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: .93rem; color: #444; line-height: 1.65;
+            align-items: flex-start;
+        }
+        .rfd-step:last-child { border-bottom: none; }
+        .rfd-step-num {
+            flex-shrink: 0; width: 28px; height: 28px;
+            background: #e84248; color: #fff;
+            border-radius: 50%; display: flex;
+            align-items: center; justify-content: center;
+            font-size: .8rem; font-weight: 800;
+            margin-top: 2px;
+        }
+        .rfd-step-num::before { content: counter(rfd-step); }
+
+        @media(max-width:480px) {
+            .rfd-title { font-size: 1.7rem; }
+            .rfd-stat  { padding: .6rem .8rem; }
         }
         </style>
 
-        <div class="rf-wrap">
+        <div class="rfd-wrap">
 
-            <!-- HERO -->
-            <div class="rf-hero">
-                <div class="rf-hero-video">
-                    <?php if ( $yt_id ) : ?>
-                        <iframe src="https://www.youtube-nocookie.com/embed/<?php echo esc_attr( $yt_id ); ?>?rel=0"
-                                title="Video" allowfullscreen loading="lazy"></iframe>
-                    <?php elseif ( $thumb ) : ?>
-                        <img src="<?php echo esc_url( $thumb ); ?>" alt="<?php echo esc_attr( get_the_title() ); ?>">
-                    <?php else : ?>
-                        <div class="rf-no-media">🍽️</div>
-                    <?php endif; ?>
-                </div>
+            <!-- Título -->
+            <h1 class="rfd-title"><?php echo esc_html( get_the_title() ); ?></h1>
 
-                <div class="rf-hero-info">
-                    <?php if ( $categorias ) : ?>
-                    <p class="rf-categoria"><?php echo $categorias; ?></p>
+            <!-- Meta bar -->
+            <div class="rfd-meta">
+                <span class="rfd-meta-author">
+                    <?php if ( $author_url ) : ?>
+                        <img src="<?php echo esc_url( $author_url ); ?>"
+                             alt="<?php echo esc_attr( $author_name ); ?>">
                     <?php endif; ?>
-                    <h1 class="rf-titulo"><?php echo esc_html( get_the_title() ); ?></h1>
-                    <?php if ( $excerpt ) : ?>
-                    <p class="rf-descripcion"><?php echo esc_html( $excerpt ); ?></p>
-                    <?php endif; ?>
-
-                    <div class="rf-meta-row">
-                        <?php if ( $dificultad ) : ?>
-                        <div class="rf-meta-item">
-                            <span class="rf-meta-label">Dificultad</span>
-                            <span class="rf-meta-value dif" style="color:<?php echo esc_attr($dif_color); ?>"><?php echo esc_html( $dificultad ); ?></span>
-                        </div>
-                        <?php endif; ?>
-                        <?php if ( $lineas_ingr ) : ?>
-                        <div class="rf-meta-item">
-                            <span class="rf-meta-label">Ingredientes</span>
-                            <span class="rf-meta-value"><?php echo count( $lineas_ingr ); ?></span>
-                        </div>
-                        <?php endif; ?>
-                        <?php if ( $tiempo ) : ?>
-                        <div class="rf-meta-item">
-                            <span class="rf-meta-label">Tiempo</span>
-                            <span class="rf-meta-value"><?php echo esc_html( $tiempo ); ?></span>
-                        </div>
-                        <?php endif; ?>
-                        <?php if ( $porciones ) : ?>
-                        <div class="rf-meta-item">
-                            <span class="rf-meta-label">Porciones</span>
-                            <span class="rf-meta-value"><?php echo esc_html( $porciones ); ?></span>
-                        </div>
-                        <?php endif; ?>
-                    </div>
-                </div>
+                    <span><?php echo esc_html( $author_name ); ?></span>
+                </span>
+                <span class="rfd-meta-sep">|</span>
+                <span>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                         stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:3px">
+                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                        <line x1="16" y1="2" x2="16" y2="6"/>
+                        <line x1="8" y1="2" x2="8" y2="6"/>
+                        <line x1="3" y1="10" x2="21" y2="10"/>
+                    </svg>
+                    <?php echo esc_html( $pub_date ); ?>
+                </span>
+                <?php foreach ( $cats_list as $cat ) : ?>
+                <a class="rfd-meta-cat"
+                   href="<?php echo esc_url( get_term_link( $cat ) ); ?>">
+                    <?php echo esc_html( $cat->name ); ?>
+                </a>
+                <?php endforeach; ?>
             </div>
 
-            <!-- PANELS -->
-            <?php if ( $lineas_ingr || $pasos ) : ?>
-            <div class="rf-panels">
+            <!-- Excerpt -->
+            <?php if ( $excerpt ) : ?>
+            <p class="rfd-excerpt"><?php echo esc_html( $excerpt ); ?></p>
+            <?php endif; ?>
 
-                <?php if ( $lineas_ingr ) : ?>
-                <div class="rf-panel">
-                    <p class="rf-panel-title">Ingredientes</p>
-                    <ul class="rf-ingr-list">
-                        <?php foreach ( $lineas_ingr as $ingr ) : ?>
-                        <li><?php echo esc_html( $ingr ); ?></li>
-                        <?php endforeach; ?>
-                    </ul>
+            <!-- Hero imagen / video -->
+            <div class="rfd-hero">
+                <?php if ( $yt_id ) : ?>
+                    <img src="<?php echo esc_url( "https://img.youtube.com/vi/{$yt_id}/maxresdefault.jpg" ); ?>"
+                         alt="<?php echo esc_attr( get_the_title() ); ?>"
+                         id="rfd-thumb-<?php echo esc_attr( $post_id ); ?>">
+                    <div class="rfd-hero-play"
+                         id="rfd-play-<?php echo esc_attr( $post_id ); ?>"
+                         data-yt="<?php echo esc_attr( $yt_id ); ?>"
+                         data-pid="<?php echo esc_attr( $post_id ); ?>"
+                         role="button" aria-label="Reproducir video">
+                        <svg width="72" height="72" viewBox="0 0 72 72" fill="none">
+                            <circle cx="36" cy="36" r="36" fill="rgba(255,255,255,0.9)"/>
+                            <polygon points="28,20 28,52 56,36" fill="#e84248"/>
+                        </svg>
+                    </div>
+                    <script>
+                    (function(){
+                        var btn = document.getElementById('rfd-play-<?php echo esc_js( $post_id ); ?>');
+                        if (!btn) return;
+                        btn.addEventListener('click', function(){
+                            var pid = this.dataset.pid;
+                            var yt  = this.dataset.yt;
+                            var hero = this.parentElement;
+                            document.getElementById('rfd-thumb-' + pid).remove();
+                            this.remove();
+                            var iframe = document.createElement('iframe');
+                            iframe.src = 'https://www.youtube-nocookie.com/embed/' + yt + '?autoplay=1&rel=0';
+                            iframe.setAttribute('allowfullscreen', '');
+                            iframe.setAttribute('allow', 'autoplay');
+                            hero.appendChild(iframe);
+                        });
+                    })();
+                    </script>
+                <?php elseif ( $thumb ) : ?>
+                    <img src="<?php echo esc_url( $thumb ); ?>"
+                         alt="<?php echo esc_attr( get_the_title() ); ?>">
+                <?php else : ?>
+                    <div class="rfd-hero-no-img">🍽️</div>
+                <?php endif; ?>
+            </div>
+
+            <!-- Barra de stats -->
+            <?php if ( $tiempo || $porciones || $dificultad || $lineas_ingr ) : ?>
+            <div class="rfd-stats">
+                <?php if ( $tiempo ) : ?>
+                <div class="rfd-stat">
+                    <span class="rfd-stat-label">Tiempo</span>
+                    <span class="rfd-stat-value">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                             stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <polyline points="12 6 12 12 16 14"/>
+                        </svg>
+                        <?php echo esc_html( $tiempo ); ?>
+                    </span>
                 </div>
                 <?php endif; ?>
+                <?php if ( $porciones ) : ?>
+                <div class="rfd-stat">
+                    <span class="rfd-stat-label">Porciones</span>
+                    <span class="rfd-stat-value">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                             stroke="currentColor" stroke-width="2">
+                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                            <circle cx="9" cy="7" r="4"/>
+                        </svg>
+                        <?php echo esc_html( $porciones ); ?>
+                    </span>
+                </div>
+                <?php endif; ?>
+                <?php if ( $dificultad ) :
+                    $dif_colors = [ 'Alta' => '#e84248', 'Media' => '#ff7c3c', 'Baja' => '#1aaf9e' ];
+                    $dc = $dif_colors[ $dificultad ] ?? '#555';
+                ?>
+                <div class="rfd-stat">
+                    <span class="rfd-stat-label">Dificultad</span>
+                    <span class="rfd-stat-value" style="color:<?php echo esc_attr($dc); ?>">
+                        <?php echo esc_html( $dificultad ); ?>
+                    </span>
+                </div>
+                <?php endif; ?>
+                <?php if ( $lineas_ingr ) :
+                    $n_ingr = count( array_filter( $lineas_ingr, fn($l) => ! str_ends_with($l, ':') ) );
+                ?>
+                <div class="rfd-stat">
+                    <span class="rfd-stat-label">Ingredientes</span>
+                    <span class="rfd-stat-value"><?php echo $n_ingr; ?></span>
+                </div>
+                <?php endif; ?>
+            </div>
+            <?php endif; ?>
 
+            <!-- Cuerpo: Ingredientes | Instrucciones -->
+            <?php if ( $lineas_ingr || $pasos ) : ?>
+            <div class="rfd-body">
+
+                <!-- Ingredientes -->
+                <?php if ( $lineas_ingr ) : ?>
+                <section>
+                    <h2 class="rfd-section-title">Ingredientes</h2>
+                    <ul class="rfd-ingr-list" id="rfd-ingr-<?php echo esc_attr( $post_id ); ?>">
+                    <?php foreach ( $lineas_ingr as $li ) :
+                        $is_header = str_ends_with( $li, ':' );
+                        if ( $is_header ) : ?>
+                        </ul>
+                        <p class="rfd-ingr-group-title"><?php echo esc_html( rtrim( $li, ':' ) ); ?></p>
+                        <ul class="rfd-ingr-list">
+                        <?php else : ?>
+                        <li class="rfd-ingr-item" role="checkbox" aria-checked="false" tabindex="0">
+                            <span class="rfd-ingr-circle"></span>
+                            <span class="rfd-ingr-text"><?php echo esc_html( $li ); ?></span>
+                        </li>
+                        <?php endif;
+                    endforeach; ?>
+                    </ul>
+                </section>
+                <?php endif; ?>
+
+                <!-- Instrucciones -->
                 <?php if ( $pasos ) : ?>
-                <div class="rf-panel">
-                    <p class="rf-panel-title">Preparación</p>
-                    <ol class="rf-pasos-list">
+                <section>
+                    <h2 class="rfd-section-title">Instrucciones</h2>
+                    <ol class="rfd-steps-list">
                         <?php foreach ( $pasos as $paso ) : ?>
-                        <li><?php echo esc_html( $paso ); ?></li>
+                        <li class="rfd-step">
+                            <span class="rfd-step-num" aria-hidden="true"></span>
+                            <span><?php echo esc_html( $paso ); ?></span>
+                        </li>
                         <?php endforeach; ?>
                     </ol>
-                </div>
+                </section>
                 <?php endif; ?>
 
             </div>
             <?php endif; ?>
 
         </div>
+
+        <script>
+        (function(){
+            document.querySelectorAll('.rfd-ingr-item').forEach(function(item){
+                function toggle() {
+                    item.classList.toggle('checked');
+                    item.setAttribute('aria-checked', item.classList.contains('checked') ? 'true' : 'false');
+                }
+                item.addEventListener('click', toggle);
+                item.addEventListener('keydown', function(e){
+                    if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); toggle(); }
+                });
+            });
+        })();
+        </script>
         <?php
         $rendering = false;
         return ob_get_clean();
@@ -2811,163 +2976,273 @@ class ADN_Productos_Plugin {
     }
 
     /**
-     * Shortcode [adn_recetas columns="3" limit="12"]
+     * Shortcode [adn_recetas limit="50"]
+     * Buscador pill + listado con layout alternado imagen/texto y fondos de color.
      */
     public function render_recetas_shortcode( $atts ): string {
         $atts = shortcode_atts( [
-            'columns' => 3,
-            'limit'   => 12,
+            'limit' => 50,
         ], $atts, 'adn_recetas' );
 
-        $columns = max( 1, (int) $atts['columns'] );
-        $limit   = max( 1, (int) $atts['limit'] );
+        $limit  = max( 1, (int) $atts['limit'] );
+        $search = isset( $_GET['receta_s'] ) ? sanitize_text_field( wp_unslash( $_GET['receta_s'] ) ) : '';
 
-        $query = new WP_Query( [
+        $q_args = [
             'post_type'      => 'receta',
             'post_status'    => 'publish',
             'posts_per_page' => $limit,
             'orderby'        => 'date',
             'order'          => 'DESC',
-            'no_found_rows'  => true,
-        ] );
-
-        if ( ! $query->have_posts() ) {
-            return '<p class="adn-recetas-vacio">No hay recetas publicadas.</p>';
+        ];
+        if ( $search ) {
+            $q_args['s'] = $search;
         }
+        $query = new WP_Query( $q_args );
 
-        $dificultad_colores = [
-            'Alta'  => '#f8d7da',
-            'Media' => '#fff3cd',
-            'Baja'  => '#d1e7dd',
-        ];
-        $dificultad_texto = [
-            'Alta'  => '#842029',
-            'Media' => '#856404',
-            'Baja'  => '#0a5233',
-        ];
+        // Colores de acento que rotan por tarjeta (fondo del lado de imagen)
+        $accents = [ '#f5f5f5', '#e84248', '#1aaf9e', '#ff7c3c', '#5b4fcf', '#d6a800' ];
 
         ob_start();
         ?>
         <style>
-        .adn-recetas-grid {
-            display: grid;
-            grid-template-columns: repeat(<?php echo $columns; ?>, 1fr);
-            gap: 1.5rem;
-            margin: 1.5rem 0;
+        /* ── Buscador ───────────────────────────────────────────────── */
+        .adn-rbuscador-wrap { text-align:center; margin:2.2rem 0 2.8rem; }
+        .adn-rbuscador-form { display:inline-block; width:min(520px,92%); }
+        .adn-rbuscador-inner {
+            display:flex; align-items:center; gap:10px;
+            border:2px solid #111; border-radius:50px;
+            padding:10px 22px; background:#fff;
         }
-        @media (max-width: 900px) { .adn-recetas-grid { grid-template-columns: repeat(2, 1fr); } }
-        @media (max-width: 600px) { .adn-recetas-grid { grid-template-columns: 1fr; } }
-        .adn-receta-card {
-            background: #fff;
-            border-radius: 12px;
-            box-shadow: 0 2px 12px rgba(0,0,0,.08);
-            overflow: hidden;
-            transition: transform .2s, box-shadow .2s;
-            display: flex;
-            flex-direction: column;
+        .adn-rbuscador-inner input[type=text] {
+            flex:1; border:none; outline:none;
+            font-size:1rem; background:transparent; color:#111;
+            letter-spacing:.06em;
         }
-        .adn-receta-card:hover { transform: translateY(-4px); box-shadow: 0 6px 24px rgba(0,0,0,.13); }
-        .adn-receta-img-wrap { position: relative; aspect-ratio: 4/3; overflow: hidden; background: #f0f0f0; }
-        .adn-receta-img-wrap img { width: 100%; height: 100%; object-fit: cover; display: block; }
-        .adn-receta-img-wrap .adn-receta-dif {
-            position: absolute; top: 10px; right: 10px;
-            padding: 3px 10px; border-radius: 20px; font-size: .75em; font-weight: 700;
+        .adn-rbuscador-inner input[type=text]::placeholder { color:#888; }
+        .adn-rbuscador-inner button {
+            background:none; border:none; cursor:pointer;
+            padding:0; display:flex; align-items:center; color:#111;
         }
-        .adn-receta-body { padding: 1rem 1.1rem; flex: 1; display: flex; flex-direction: column; }
-        .adn-receta-title {
-            font-size: 1.05em; font-weight: 700; margin: 0 0 .5rem;
-            color: #111; line-height: 1.3;
+        .adn-rbuscador-inner button:hover { color:#e84248; }
+
+        /* ── Lista alternada ────────────────────────────────────────── */
+        .adn-recetas-lista { display:flex; flex-direction:column; }
+
+        .adn-receta-row {
+            display:grid; grid-template-columns:1fr 1fr; min-height:340px;
         }
-        .adn-receta-title a { color: inherit; text-decoration: none; }
-        .adn-receta-title a:hover { color: #c8121a; }
-        .adn-receta-excerpt { font-size: .88em; color: #555; flex: 1; margin-bottom: .8rem; line-height: 1.5; }
-        .adn-receta-meta {
-            display: flex; gap: .8rem; flex-wrap: wrap;
-            font-size: .8em; color: #777; border-top: 1px solid #eee; padding-top: .7rem; margin-top: auto;
+        .adn-receta-row-img {
+            position:relative; overflow:hidden;
+            display:flex; align-items:center; justify-content:center;
         }
-        .adn-receta-meta span { display: flex; align-items: center; gap: 4px; }
-        .adn-receta-meta svg { flex-shrink: 0; }
-        .adn-receta-btn {
-            display: inline-block; margin-top: .9rem;
-            background: #c8121a; color: #fff; padding: 7px 18px;
-            border-radius: 6px; font-size: .85em; font-weight: 600; text-decoration: none;
+        .adn-receta-row-img a { display:block; width:100%; height:100%; }
+        .adn-receta-row-img img {
+            width:100%; height:100%; object-fit:cover; display:block;
+            transition:transform .4s ease;
         }
-        .adn-receta-btn:hover { background: #a00e14; color: #fff; }
-        .adn-recetas-vacio { color: #888; font-style: italic; }
+        .adn-receta-row:hover .adn-receta-row-img img { transform:scale(1.04); }
+        .adn-receta-row-img .adn-yt-play {
+            position:absolute; inset:0;
+            display:flex; align-items:center; justify-content:center;
+            pointer-events:none;
+        }
+
+        .adn-receta-row-content {
+            padding:2.8rem 3.2rem; display:flex; flex-direction:column;
+            justify-content:center; background:#fff;
+        }
+        .adn-receta-row-title {
+            font-size:1.5rem; font-weight:800; margin:0 0 .9rem;
+            color:#111; line-height:1.25;
+        }
+        .adn-receta-row-title a { color:inherit; text-decoration:none; }
+        .adn-receta-row-title a:hover { color:#e84248; }
+        .adn-receta-row-excerpt {
+            font-size:.93rem; color:#555; line-height:1.65;
+            margin:0 0 1rem; flex:1;
+            display:-webkit-box; -webkit-line-clamp:4;
+            -webkit-box-orient:vertical; overflow:hidden;
+        }
+        .adn-receta-row-cats {
+            display:flex; flex-wrap:wrap; gap:.45rem; margin-bottom:1rem;
+        }
+        .adn-receta-row-cats span {
+            font-size:.82rem; color:#888; font-weight:500;
+        }
+        .adn-receta-row-meta {
+            display:flex; flex-wrap:wrap; gap:.9rem;
+            font-size:.82rem; color:#666; margin-bottom:1.2rem;
+        }
+        .adn-receta-row-meta span { display:flex; align-items:center; gap:5px; }
+        .adn-receta-row-btn {
+            display:inline-block; align-self:flex-start;
+            padding:9px 26px; border-radius:6px;
+            font-size:.88rem; font-weight:700; text-decoration:none;
+            color:#fff; background:#1976d2; transition:opacity .2s;
+        }
+        .adn-receta-row-btn:hover { opacity:.85; color:#fff; }
+
+        /* Filas pares: imagen a la derecha */
+        .adn-receta-row--reverse .adn-receta-row-img   { order:2; }
+        .adn-receta-row--reverse .adn-receta-row-content { order:1; }
+
+        /* Placeholder sin imagen */
+        .adn-receta-row-no-img {
+            width:100%; height:100%; min-height:340px;
+            display:flex; align-items:center; justify-content:center;
+            font-size:5rem; color:rgba(255,255,255,.5);
+        }
+
+        /* Vacío / no resultados */
+        .adn-recetas-vacio { color:#888; font-style:italic; padding:2rem 0; text-align:center; }
+
+        @media(max-width:768px) {
+            .adn-receta-row, .adn-receta-row--reverse {
+                grid-template-columns:1fr;
+            }
+            .adn-receta-row-img   { order:1 !important; min-height:230px; }
+            .adn-receta-row-content { order:2 !important; padding:1.6rem 1.4rem; }
+            .adn-receta-row-title { font-size:1.2rem; }
+        }
         </style>
 
-        <div class="adn-recetas-grid">
-        <?php while ( $query->have_posts() ) : $query->the_post();
-            $post_id      = get_the_ID();
-            $permalink    = get_permalink();
-            $title        = get_the_title();
-            $excerpt      = get_the_excerpt();
-            $tiempo       = get_post_meta( $post_id, '_receta_tiempo',     true );
-            $porciones    = get_post_meta( $post_id, '_receta_porciones',  true );
-            $dificultad   = get_post_meta( $post_id, '_receta_dificultad', true );
-            $youtube      = get_post_meta( $post_id, '_receta_youtube',    true );
-            $yt_id        = '';
+        <!-- Buscador -->
+        <div class="adn-rbuscador-wrap">
+            <form class="adn-rbuscador-form" method="get">
+                <div class="adn-rbuscador-inner">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+                         stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                    </svg>
+                    <input type="text" name="receta_s"
+                           placeholder="Buscar recetas..."
+                           value="<?php echo esc_attr( $search ); ?>">
+                    <button type="submit" aria-label="Buscar">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+                             stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                            <line x1="5" y1="12" x2="19" y2="12"/>
+                            <polyline points="12 5 19 12 12 19"/>
+                        </svg>
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Listado -->
+        <?php if ( ! $query->have_posts() ) : ?>
+            <p class="adn-recetas-vacio">
+                <?php echo $search
+                    ? 'No se encontraron recetas para <strong>' . esc_html( $search ) . '</strong>.'
+                    : 'No hay recetas publicadas.'; ?>
+            </p>
+        <?php else : ?>
+        <div class="adn-recetas-lista">
+        <?php
+        $idx = 0;
+        while ( $query->have_posts() ) :
+            $query->the_post();
+            $idx++;
+            $post_id    = get_the_ID();
+            $permalink  = get_permalink();
+            $title      = get_the_title();
+            $excerpt    = get_the_excerpt();
+            $tiempo     = get_post_meta( $post_id, '_receta_tiempo',     true );
+            $porciones  = get_post_meta( $post_id, '_receta_porciones',  true );
+            $dificultad = get_post_meta( $post_id, '_receta_dificultad', true );
+            $youtube    = get_post_meta( $post_id, '_receta_youtube',    true );
+            $yt_id      = '';
             if ( $youtube && preg_match( '/(?:v=|youtu\.be\/)([\w-]{11})/', $youtube, $m ) ) {
                 $yt_id = $m[1];
             }
-            $thumb        = $yt_id
-                            ? "https://img.youtube.com/vi/{$yt_id}/hqdefault.jpg"
-                            : get_the_post_thumbnail_url( $post_id, 'medium_large' );
-            $dif_bg       = $dificultad_colores[ $dificultad ] ?? '';
-            $dif_color    = $dificultad_texto[ $dificultad ] ?? '#333';
+            $thumb  = $yt_id
+                ? "https://img.youtube.com/vi/{$yt_id}/hqdefault.jpg"
+                : get_the_post_thumbnail_url( $post_id, 'large' );
+            $terminos   = get_the_terms( $post_id, 'categoria_receta' );
+            $categorias = ( $terminos && ! is_wp_error( $terminos ) ) ? $terminos : [];
+            $accent     = $accents[ ( $idx - 1 ) % count( $accents ) ];
+            $is_even    = ( $idx % 2 === 0 );
         ?>
-            <article class="adn-receta-card">
-                <div class="adn-receta-img-wrap">
-                    <?php if ( $thumb ) : ?>
-                        <a href="<?php echo esc_url( $permalink ); ?>" style="position:relative;display:block">
-                            <img src="<?php echo esc_url( $thumb ); ?>" alt="<?php echo esc_attr( $title ); ?>" loading="lazy">
-                            <?php if ( $yt_id ) : ?>
-                            <span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
-                                <svg width="54" height="38" viewBox="0 0 54 38" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                    <rect width="54" height="38" rx="8" fill="#FF0000" fill-opacity=".9"/>
-                                    <polygon points="21,10 21,28 38,19" fill="white"/>
-                                </svg>
-                            </span>
-                            <?php endif; ?>
-                        </a>
-                    <?php else : ?>
-                        <div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#aaa;font-size:3rem">🍽️</div>
+        <article class="adn-receta-row <?php echo $is_even ? 'adn-receta-row--reverse' : ''; ?>">
+
+            <!-- Imagen con fondo de color -->
+            <div class="adn-receta-row-img" style="background:<?php echo esc_attr( $accent ); ?>">
+                <?php if ( $thumb ) : ?>
+                    <a href="<?php echo esc_url( $permalink ); ?>" tabindex="-1">
+                        <img src="<?php echo esc_url( $thumb ); ?>"
+                             alt="<?php echo esc_attr( $title ); ?>" loading="lazy">
+                        <?php if ( $yt_id ) : ?>
+                        <span class="adn-yt-play">
+                            <svg width="60" height="42" viewBox="0 0 60 42" fill="none">
+                                <rect width="60" height="42" rx="9" fill="#FF0000" fill-opacity=".88"/>
+                                <polygon points="23,11 23,31 42,21" fill="white"/>
+                            </svg>
+                        </span>
+                        <?php endif; ?>
+                    </a>
+                <?php else : ?>
+                    <div class="adn-receta-row-no-img">🍽️</div>
+                <?php endif; ?>
+            </div>
+
+            <!-- Contenido -->
+            <div class="adn-receta-row-content">
+                <h3 class="adn-receta-row-title">
+                    <a href="<?php echo esc_url( $permalink ); ?>"><?php echo esc_html( $title ); ?></a>
+                </h3>
+                <?php if ( $excerpt ) : ?>
+                    <p class="adn-receta-row-excerpt"><?php echo esc_html( $excerpt ); ?></p>
+                <?php endif; ?>
+                <?php if ( ! empty( $categorias ) ) : ?>
+                <div class="adn-receta-row-cats">
+                    <?php foreach ( $categorias as $cat ) : ?>
+                        <span># <?php echo esc_html( $cat->name ); ?></span>
+                    <?php endforeach; ?>
+                </div>
+                <?php endif; ?>
+                <?php if ( $tiempo || $porciones || $dificultad ) : ?>
+                <div class="adn-receta-row-meta">
+                    <?php if ( $tiempo ) : ?>
+                    <span>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                             stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <polyline points="12 6 12 12 16 14"/>
+                        </svg>
+                        <?php echo esc_html( $tiempo ); ?>
+                    </span>
+                    <?php endif; ?>
+                    <?php if ( $porciones ) : ?>
+                    <span>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                             stroke="currentColor" stroke-width="2">
+                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                            <circle cx="9" cy="7" r="4"/>
+                        </svg>
+                        <?php echo esc_html( $porciones ); ?>
+                    </span>
                     <?php endif; ?>
                     <?php if ( $dificultad ) : ?>
-                        <span class="adn-receta-dif" style="background:<?php echo esc_attr($dif_bg); ?>;color:<?php echo esc_attr($dif_color); ?>">
-                            <?php echo esc_html( $dificultad ); ?>
-                        </span>
+                    <span>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                             stroke="currentColor" stroke-width="2">
+                            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+                        </svg>
+                        <?php echo esc_html( $dificultad ); ?>
+                    </span>
                     <?php endif; ?>
                 </div>
-                <div class="adn-receta-body">
-                    <h3 class="adn-receta-title">
-                        <a href="<?php echo esc_url( $permalink ); ?>"><?php echo esc_html( $title ); ?></a>
-                    </h3>
-                    <?php if ( $excerpt ) : ?>
-                        <p class="adn-receta-excerpt"><?php echo esc_html( $excerpt ); ?></p>
-                    <?php endif; ?>
-                    <?php if ( $tiempo || $porciones ) : ?>
-                    <div class="adn-receta-meta">
-                        <?php if ( $tiempo ) : ?>
-                        <span>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                            <?php echo esc_html( $tiempo ); ?>
-                        </span>
-                        <?php endif; ?>
-                        <?php if ( $porciones ) : ?>
-                        <span>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                            <?php echo esc_html( $porciones ); ?>
-                        </span>
-                        <?php endif; ?>
-                    </div>
-                    <?php endif; ?>
-                    <a href="<?php echo esc_url( $permalink ); ?>" class="adn-receta-btn">Ver receta</a>
-                </div>
-            </article>
+                <?php endif; ?>
+                <a href="<?php echo esc_url( $permalink ); ?>" class="adn-receta-row-btn"
+                   style="background:<?php echo esc_attr( $accent === '#f5f5f5' ? '#1976d2' : $accent ); ?>">
+                    Ver Receta
+                </a>
+            </div>
+
+        </article>
         <?php endwhile;
         wp_reset_postdata(); ?>
         </div>
+        <?php endif; ?>
         <?php
         return ob_get_clean();
     }
