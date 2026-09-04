@@ -76,6 +76,19 @@ class ADN_Productos_Plugin {
 
         // Código postal opcional (clientes ADN tienen 0000001 por defecto, no válido)
         add_filter( 'woocommerce_default_address_fields', array( $this, 'make_postcode_optional' ) );
+
+        // ── Páginas de archivo de marca: reemplazar loop WC con grid ADN ──────
+        add_action( 'wp', array( $this, 'override_brand_archive_loop' ) );
+
+        // ── WP Menu Cart: inyectar items en el slideout ────────────────────────
+        add_action( 'wp_footer', array( $this, 'wpmenucart_inject_items' ) );
+
+        // ── Recetas ────────────────────────────────────────────────────────────
+        add_action( 'init',             array( $this, 'register_receta_post_type' ) );
+        add_action( 'add_meta_boxes',   array( $this, 'receta_meta_boxes' ) );
+        add_action( 'save_post_receta', array( $this, 'receta_save_meta' ), 10, 2 );
+        add_shortcode( 'adn_recetas',   array( $this, 'render_recetas_shortcode' ) );
+        add_filter( 'the_content',      array( $this, 'receta_single_content' ) );
     }
 
     /**
@@ -291,9 +304,12 @@ class ADN_Productos_Plugin {
                 ADN_PRODUCTOS_VERSION,
                 true
             );
+            $price_range = $this->get_global_price_range();
             wp_localize_script( 'adn-productos-js', 'adnAjax', array(
-                'url'   => admin_url( 'admin-ajax.php' ),
-                'nonce' => wp_create_nonce( 'adn_filter_nonce' ),
+                'url'      => admin_url( 'admin-ajax.php' ),
+                'nonce'    => wp_create_nonce( 'adn_filter_nonce' ),
+                'priceMin' => $price_range['min'],
+                'priceMax' => $price_range['max'],
             ) );
         }
 
@@ -302,59 +318,18 @@ class ADN_Productos_Plugin {
             wp_enqueue_script( 'wc-add-to-cart' );
         }
 
-        // Toggle colapsable para secciones de filtros BeRocket
+        // Asegurar que todos los filtros del sidebar (BeRocket y marcas) estén siempre visibles
         wp_add_inline_style( 'adn-productos-style', '
-            .bapf_head,
-            .adn-marcas-titulo { position: relative; cursor: pointer; user-select: none; padding-right: 32px; }
-            .bapf_head h3, .bapf_head h5, .bapf_head * { pointer-events: none; }
-            .bapf_toggle_btn {
-                position: absolute;
-                right: 4px;
-                top: 50%;
-                transform: translateY(-50%);
-                width: 22px;
-                height: 22px;
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                font-size: 18px;
-                color: #444;
-                line-height: 1;
-                pointer-events: none;
-            }
-            .bapf_sfilter.adn-collapsed .bapf_body { display: none !important; }
-            .adn-marcas-titulo.adn-collapsed + .adn-marcas-filter-list { display: none !important; }
-        ' );
-        wp_add_inline_script( 'jquery', '
-            jQuery(function($){
-                var svgUp   = \'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="8 14 12 9 16 14"/></svg>\';
-                var svgDown = \'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="8 10 12 15 16 10"/></svg>\';
-                function initBapfToggle() {
-                    $(".bapf_head").each(function(){
-                        if ($(this).find(".bapf_toggle_btn").length) return;
-                        $(this).append($("<span class=\"bapf_toggle_btn\"></span>").html(svgUp));
-                    });
-                    $(".adn-marcas-titulo").each(function(){
-                        if ($(this).find(".bapf_toggle_btn").length) return;
-                        $(this).append($("<span class=\"bapf_toggle_btn\"></span>").html(svgUp));
-                    });
-                }
-                initBapfToggle();
-                $(document).on("click", ".bapf_head", function(){
-                    var $filter = $(this).closest(".bapf_sfilter");
-                    var $btn    = $(this).find(".bapf_toggle_btn");
-                    $filter.toggleClass("adn-collapsed");
-                    $btn.html($filter.hasClass("adn-collapsed") ? svgDown : svgUp);
-                });
-                $(document).on("click", ".adn-marcas-titulo", function(){
-                    var $btn = $(this).find(".bapf_toggle_btn");
-                    $(this).toggleClass("adn-collapsed");
-                    $btn.html($(this).hasClass("adn-collapsed") ? svgDown : svgUp);
-                });
-                $(document).on("berocket_ajax_products_loaded berocket_products_loaded", function(){
-                    initBapfToggle();
-                });
-            });
+            .bapf_sfilter .bapf_body,
+            .adn-marcas-filter-list { display: block !important; }
+            .bapf_toggle_btn { display: none !important; }
+
+            /* Mantener todas las opciones de categorías y marcas visibles aunque BeRocket las oculte por 0 resultados */
+            .bapf_sfilter ul li,
+            .bapf_sfilter ul li.bapf_hide,
+            .widget_berocket_aapf_widget ul li,
+            .widget_berocket_aapf_widget ul li.berocket_hide,
+            .widget_berocket_aapf_widget ul li.bapf_hide { display: list-item !important; }
         ' );
     }
 
@@ -428,19 +403,14 @@ class ADN_Productos_Plugin {
             return '<p class="adn-sin-productos">No se encontraron productos.</p>';
         }
 
-        $current_search  = isset( $_GET['s'] ) ? sanitize_text_field( wp_unslash( $_GET['s'] ) ) : '';
+        $current_search  = isset( $_GET['adn_s'] ) ? sanitize_text_field( wp_unslash( $_GET['adn_s'] ) ) :
+                           ( isset( $_GET['s'] ) ? sanitize_text_field( wp_unslash( $_GET['s'] ) ) : '' );
         $current_orderby = isset( $_GET['orderby'] ) ? sanitize_key( wp_unslash( $_GET['orderby'] ) ) : '';
-        $current_brand   = isset( $_GET['filter_brand'] ) ? sanitize_key( wp_unslash( $_GET['filter_brand'] ) ) : '';
-
-        // Detectar taxonomía de marcas activa
-        $brand_tax   = $this->detect_brand_taxonomy();
-        $brand_terms = $brand_tax
-            ? get_terms( array( 'taxonomy' => $brand_tax, 'hide_empty' => true, 'orderby' => 'name', 'order' => 'ASC' ) )
-            : array();
+        $brand_tax       = $this->detect_brand_taxonomy();
 
         ob_start();
         ?>
-        <div class="adn-productos-wrapper woocommerce" data-columns="<?php echo esc_attr( $columns ); ?>" data-per-page="<?php echo esc_attr( $args['posts_per_page'] ); ?>" data-brand-tax="<?php echo esc_attr( $brand_tax ); ?>">
+        <div class="adn-productos-wrapper woocommerce" data-columns="<?php echo esc_attr( $columns ); ?>" data-per-page="<?php echo esc_attr( $args['posts_per_page'] ); ?>">
 
             <div class="adn-filtros-bar">
                 <div class="adn-filtro-busqueda">
@@ -462,18 +432,6 @@ class ADN_Productos_Plugin {
                         <option value="popularity"<?php selected( $current_orderby, 'popularity' ); ?>><?php esc_html_e( 'Más populares', 'adn-productos' ); ?></option>
                     </select>
                 </div>
-                <?php if ( ! empty( $brand_terms ) && ! is_wp_error( $brand_terms ) ) : ?>
-                <div class="adn-filtro-marca">
-                    <select id="adn-brand-select" class="adn-brand-select" aria-label="<?php esc_attr_e( 'Filtrar por marca', 'adn-productos' ); ?>">
-                        <option value=""><?php esc_html_e( 'Todas las marcas', 'adn-productos' ); ?></option>
-                        <?php foreach ( $brand_terms as $bt ) : ?>
-                        <option value="<?php echo esc_attr( $bt->slug ); ?>" <?php selected( $current_brand, $bt->slug ); ?>>
-                            <?php echo esc_html( $bt->name ); ?>
-                        </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                <?php endif; ?>
             </div>
 
             <p class="adn-resultado-count"><?php
@@ -521,7 +479,7 @@ class ADN_Productos_Plugin {
         $brand_str   = implode( ', ', $brand_terms );
         $thumb_url   = get_the_post_thumbnail_url( $product_id, 'woocommerce_thumbnail' );
         if ( ! $thumb_url ) {
-            $thumb_url = content_url( 'uploads/2026/08/logo_varela_insta.jpg' );
+            $thumb_url = wc_placeholder_img_src( 'woocommerce_thumbnail' );
         }
 
         ob_start();
@@ -564,6 +522,56 @@ class ADN_Productos_Plugin {
         </li>
         <?php
         return ob_get_clean();
+    }
+
+    /**
+     * En páginas de archivo de marca, reemplaza el loop nativo de WooCommerce
+     * con el grid de tarjetas ADN (mismo formato que el shortcode [adn_productos]).
+     */
+    public function override_brand_archive_loop() {
+        $brand_taxes = array( 'product_brand', 'pwb-brand', 'berocket_brand', 'brand' );
+        $is_brand    = false;
+        foreach ( $brand_taxes as $tax ) {
+            if ( taxonomy_exists( $tax ) && is_tax( $tax ) ) {
+                $is_brand = true;
+                break;
+            }
+        }
+        if ( ! $is_brand ) { return; }
+
+        // Eliminar el sidebar / widgets de la plantilla del tema en páginas de marca
+        add_filter( 'is_active_sidebar', function( $active, $index ) {
+            return false;
+        }, 99, 2 );
+
+        // Capturar TODO el output del loop nativo de WooCommerce
+        add_action( 'woocommerce_before_shop_loop', function() {
+            ob_start();
+        }, 1 );
+
+        // Descartar el output de WC y emitir nuestro grid ADN
+        add_action( 'woocommerce_after_shop_loop', function() {
+            ob_end_clean();
+            global $wp_query;
+            if ( ! $wp_query || ! $wp_query->have_posts() ) { return; }
+
+            $wp_query->rewind_posts();
+
+            echo '<div class="adn-productos-wrapper woocommerce">';
+            echo '<ul class="products adn-productos-grid columns-3" style="--adn-columns:3">';
+            while ( $wp_query->have_posts() ) {
+                $wp_query->the_post();
+                $product = wc_get_product( get_the_ID() );
+                if ( $product ) {
+                    echo $this->render_product_card( $product ); // phpcs:ignore
+                }
+            }
+            echo '</ul>';
+            echo '</div>';
+
+            $wp_query->rewind_posts();
+            wp_reset_postdata();
+        }, PHP_INT_MAX );
     }
 
     /**
@@ -740,6 +748,39 @@ class ADN_Productos_Plugin {
             }
         }
 
+        // Filtro de precio: prioridad POST directo → formato BeRocket raw_filters → location_search
+        $price_min_post = isset( $_POST['min_price'] ) ? trim( sanitize_text_field( wp_unslash( $_POST['min_price'] ) ) ) : '';
+        $price_max_post = isset( $_POST['max_price'] ) ? trim( sanitize_text_field( wp_unslash( $_POST['max_price'] ) ) ) : '';
+
+        if ( '' !== $price_min_post && '' !== $price_max_post ) {
+            // Precio enviado explícitamente por el JS (vía adnBerocketState o URL)
+            $args['meta_query'][] = array(
+                'key'     => '_price',
+                'value'   => array( floatval( $price_min_post ), floatval( $price_max_post ) ),
+                'compare' => 'BETWEEN',
+                'type'    => 'NUMERIC',
+            );
+        } else {
+            // Fallback: parsear formato BeRocket price[min_max] desde raw_filters o location_search
+            $br_filters_str = '';
+            if ( ! empty( $_POST['raw_filters'] ) ) {
+                $br_filters_str = sanitize_text_field( wp_unslash( $_POST['raw_filters'] ) );
+            }
+            if ( empty( $br_filters_str ) && ! empty( $_POST['location_search'] ) ) {
+                $ls = ltrim( sanitize_text_field( wp_unslash( $_POST['location_search'] ) ), '?' );
+                parse_str( $ls, $ls_p );
+                $br_filters_str = isset( $ls_p['filters'] ) ? sanitize_text_field( $ls_p['filters'] ) : '';
+            }
+            if ( $br_filters_str && preg_match( '/price\[(\d+(?:\.\d+)?)_(\d+(?:\.\d+)?)\]/', $br_filters_str, $pm ) ) {
+                $args['meta_query'][] = array(
+                    'key'     => '_price',
+                    'value'   => array( floatval( $pm[1] ), floatval( $pm[2] ) ),
+                    'compare' => 'BETWEEN',
+                    'type'    => 'NUMERIC',
+                );
+            }
+        }
+
         // Asegurar relación AND cuando hay múltiples tax_query
         if ( count( $args['tax_query'] ) > 1 && ! isset( $args['tax_query']['relation'] ) ) {
             $args['tax_query']['relation'] = 'AND';
@@ -785,6 +826,9 @@ class ADN_Productos_Plugin {
             'count' => $query->found_posts,
             'debug' => array(
                 'tax_query'       => $args['tax_query'],
+                'meta_query'      => isset( $args['meta_query'] ) ? $args['meta_query'] : array(),
+                'min_price_in'    => $price_min_post,
+                'max_price_in'    => $price_max_post,
                 'filters_json_in' => isset( $_POST['filters_json'] ) ? substr( $_POST['filters_json'], 0, 500 ) : null,
                 'raw_filters_in'  => isset( $_POST['raw_filters'] )  ? substr( $_POST['raw_filters'],  0, 200 ) : null,
                 's_in'            => isset( $_POST['s'] )             ? $_POST['s']                             : null,
@@ -947,6 +991,29 @@ class ADN_Productos_Plugin {
     }
 
     /**
+     * Retorna el rango global de precios { min, max } de todos los productos publicados.
+     */
+    private function get_global_price_range() {
+        global $wpdb;
+        $row = $wpdb->get_row(
+            "SELECT
+                MIN( CAST( pm.meta_value AS DECIMAL(10,2) ) ) AS min_p,
+                MAX( CAST( pm.meta_value AS DECIMAL(10,2) ) ) AS max_p
+             FROM {$wpdb->postmeta} pm
+             INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id
+             WHERE pm.meta_key = '_price'
+               AND p.post_type = 'product'
+               AND p.post_status = 'publish'
+               AND pm.meta_value != ''
+               AND CAST( pm.meta_value AS DECIMAL(10,2) ) > 0"
+        );
+        return array(
+            'min' => $row ? (int) floor( (float) $row->min_p ) : 0,
+            'max' => $row ? (int) ceil(  (float) $row->max_p ) : 10000,
+        );
+    }
+
+    /**
      * Construye los args base de WP_Query a partir de los atributos del shortcode.
      */
     private function build_query_args( $atts ) {
@@ -1044,6 +1111,7 @@ class ADN_Productos_Plugin {
             $host        = isset( $_SERVER['HTTP_HOST'] ) ? sanitize_text_field( wp_unslash( $_SERVER['HTTP_HOST'] ) ) : '';
             $full_url    = $scheme . '://' . $host . $request_uri;
             $base_url    = remove_query_arg( 'adn_paged', $full_url );
+            $paged       = isset( $_GET['adn_paged'] ) ? max( 1, intval( $_GET['adn_paged'] ) ) : 1;
         }
         $sep         = strpos( $base_url, '?' ) !== false ? '&' : '?';
 
@@ -1815,9 +1883,10 @@ class ADN_Productos_Plugin {
             return new WP_REST_Response( [ 'error' => 'Falta el campo customers (array)' ], 400 );
         }
 
-        $created = 0;
-        $updated = 0;
-        $errors  = 0;
+        $created       = 0;
+        $updated       = 0;
+        $errors        = 0;
+        $error_details = [];
 
         foreach ( $customers as $item ) {
             $codigo       = sanitize_text_field( trim( $item['codigo']        ?? '' ) );
@@ -1859,7 +1928,7 @@ class ADN_Productos_Plugin {
                 $last_name  = $parts[1] ?? '';
             }
 
-            // Buscar usuario existente por meta ADN o por email
+            // Buscar usuario existente por meta ADN o por email (real o fallback)
             $existing_id = null;
             $by_meta = get_users( [
                 'meta_key'   => '_adn_cli_codigo',
@@ -1869,9 +1938,17 @@ class ADN_Productos_Plugin {
             ] );
             if ( ! empty( $by_meta ) ) {
                 $existing_id = (int) $by_meta[0];
-            } elseif ( ! empty( $email_raw ) ) {
-                $by_email = get_user_by( 'email', $email_raw );
-                if ( $by_email ) { $existing_id = $by_email->ID; }
+            } else {
+                // Buscar por email real de ADN
+                if ( ! empty( $email_raw ) ) {
+                    $by_email = get_user_by( 'email', $email_raw );
+                    if ( $by_email ) { $existing_id = $by_email->ID; }
+                }
+                // Si no encontró, buscar por el email construido (rif@correo.com) que pudo haberse guardado antes
+                if ( ! $existing_id && $email !== $email_raw ) {
+                    $by_email2 = get_user_by( 'email', $email );
+                    if ( $by_email2 ) { $existing_id = $by_email2->ID; }
+                }
             }
 
             if ( $existing_id ) {
@@ -1886,7 +1963,9 @@ class ADN_Productos_Plugin {
                 ] );
                 if ( is_wp_error( $result ) ) {
                     $errors++;
-                    $this->adn_log( 'customers', 'ERROR update ' . $codigo . ': ' . $result->get_error_message() );
+                    $msg = 'ERROR update ' . $codigo . ': ' . $result->get_error_message();
+                    $this->adn_log( 'customers', $msg );
+                    $error_details[] = $msg;
                     continue;
                 }
                 $user_id = $existing_id;
@@ -1910,7 +1989,9 @@ class ADN_Productos_Plugin {
                 ] );
                 if ( is_wp_error( $result ) ) {
                     $errors++;
-                    $this->adn_log( 'customers', 'ERROR create ' . $codigo . ': ' . $result->get_error_message() );
+                    $msg = 'ERROR create ' . $codigo . ': ' . $result->get_error_message();
+                    $this->adn_log( 'customers', $msg );
+                    $error_details[] = $msg;
                     continue;
                 }
                 $user_id = $result;
@@ -1935,10 +2016,11 @@ class ADN_Productos_Plugin {
         update_option( 'adn_loro_last_sync', date( 'Y-m-d H:i:s' ) );
 
         return new WP_REST_Response( [
-            'created' => $created,
-            'updated' => $updated,
-            'errors'  => $errors,
-            'total'   => $created + $updated + $errors,
+            'created'       => $created,
+            'updated'       => $updated,
+            'errors'        => $errors,
+            'total'         => $created + $updated + $errors,
+            'error_details' => $error_details,
         ], 200 );
     }
 
@@ -1994,8 +2076,8 @@ class ADN_Productos_Plugin {
     public function maybe_create_adn_orders_table(): void {
         global $wpdb;
         $table   = $wpdb->prefix . 'adn_orders';
-        $version = get_option( 'adn_orders_table_version', 0 );
-        if ( (int) $version >= 1 ) {
+        $version = (int) get_option( 'adn_orders_table_version', 0 );
+        if ( $version >= 3 ) {
             return;
         }
         $charset = $wpdb->get_charset_collate();
@@ -2006,10 +2088,14 @@ class ADN_Productos_Plugin {
             `adn_rif`        VARCHAR(30)     NOT NULL DEFAULT '',
             `adn_email`      VARCHAR(100)    NOT NULL DEFAULT '',
             `cliente_codigo` VARCHAR(20)     NOT NULL DEFAULT '',
-            `fecha`          DATETIME        NOT NULL,
+            `fecha`          DATE            NOT NULL DEFAULT '0000-00-00',
+            `recepcion`      DATE                     DEFAULT NULL,
             `estado`         VARCHAR(30)     NOT NULL DEFAULT '',
             `total_bs`       DECIMAL(15,2)   NOT NULL DEFAULT 0.00,
             `total_usd`      DECIMAL(15,2)   NOT NULL DEFAULT 0.00,
+            `vendedor`       VARCHAR(100)    NOT NULL DEFAULT '',
+            `dias_ven`       INT             NOT NULL DEFAULT 0,
+            `doc_origin`     VARCHAR(60)     NOT NULL DEFAULT '',
             `items_json`     LONGTEXT        NOT NULL,
             `synced_at`      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             PRIMARY KEY (`id`),
@@ -2019,7 +2105,16 @@ class ADN_Productos_Plugin {
         ) {$charset};";
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
         dbDelta( $sql );
-        update_option( 'adn_orders_table_version', 1 );
+        // Migraciones incrementales para instalaciones previas
+        if ( $version >= 1 ) {
+            $wpdb->query( "ALTER TABLE `{$table}` ADD COLUMN IF NOT EXISTS `vendedor`    VARCHAR(100) NOT NULL DEFAULT ''" );
+        }
+        if ( $version >= 2 ) {
+            $wpdb->query( "ALTER TABLE `{$table}` ADD COLUMN IF NOT EXISTS `recepcion`   DATE DEFAULT NULL" );
+            $wpdb->query( "ALTER TABLE `{$table}` ADD COLUMN IF NOT EXISTS `dias_ven`    INT NOT NULL DEFAULT 0" );
+            $wpdb->query( "ALTER TABLE `{$table}` ADD COLUMN IF NOT EXISTS `doc_origin`  VARCHAR(60) NOT NULL DEFAULT ''" );
+        }
+        update_option( 'adn_orders_table_version', 3 );
     }
 
     // ─── Endpoint: Archivar productos ausentes en ADN ─────────────────────────
@@ -2099,11 +2194,14 @@ class ADN_Productos_Plugin {
             $rif    = sanitize_text_field( $o['rif']            ?? '' );
             $email  = sanitize_email(      $o['email']          ?? '' );
             $cod    = sanitize_text_field( $o['cliente_codigo'] ?? '' );
-            $fecha  = sanitize_text_field( $o['fecha']          ?? '' );
-            $estado = sanitize_text_field( $o['estado']         ?? '' );
-            $tbs    = (float) ( $o['total_bs']  ?? 0 );
-            $tusd   = (float) ( $o['total_usd'] ?? 0 );
-            $items  = $o['items'] ?? [];
+            $fecha      = sanitize_text_field( $o['fecha']          ?? '' );
+            $recepcion  = sanitize_text_field( $o['recepcion']      ?? '' );
+            $estado     = sanitize_text_field( $o['estado']         ?? '' );
+            $tbs        = (float) ( $o['total_bs']  ?? 0 );
+            $tusd       = (float) ( $o['total_usd'] ?? 0 );
+            $dias_ven   = (int)   ( $o['dias_ven']  ?? 0 );
+            $doc_origin = sanitize_text_field( $o['doc_origin']     ?? '' );
+            $items      = $o['items'] ?? [];
 
             if ( empty( $tipo ) || empty( $numero ) || empty( $rif ) ) {
                 $errors++;
@@ -2111,21 +2209,28 @@ class ADN_Productos_Plugin {
             }
 
             $items_json = wp_json_encode( $items );
+            $vendedor   = sanitize_text_field( $o['vendedor'] ?? '' );
+            $fecha_sql  = ( $fecha && $fecha !== '0000-00-00' ) ? $fecha : '0000-00-00';
+            $rec_sql    = ( $recepcion && $recepcion !== '0000-00-00' ) ? $recepcion : null;
 
             $result = $wpdb->query( $wpdb->prepare(
                 "INSERT INTO `{$table}`
-                    (adn_tipo, adn_numero, adn_rif, adn_email, cliente_codigo, fecha, estado, total_bs, total_usd, items_json, synced_at)
-                 VALUES (%s, %s, %s, %s, %s, %s, %s, %f, %f, %s, NOW())
+                    (adn_tipo, adn_numero, adn_rif, adn_email, cliente_codigo, fecha, recepcion, estado, total_bs, total_usd, vendedor, dias_ven, doc_origin, items_json, synced_at)
+                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %f, %f, %s, %d, %s, %s, NOW())
                  ON DUPLICATE KEY UPDATE
                     adn_rif        = VALUES(adn_rif),
                     adn_email      = VALUES(adn_email),
                     fecha          = VALUES(fecha),
+                    recepcion      = VALUES(recepcion),
                     estado         = VALUES(estado),
                     total_bs       = VALUES(total_bs),
                     total_usd      = VALUES(total_usd),
+                    vendedor       = VALUES(vendedor),
+                    dias_ven       = VALUES(dias_ven),
+                    doc_origin     = VALUES(doc_origin),
                     items_json     = VALUES(items_json),
                     synced_at      = NOW()",
-                $tipo, $numero, $rif, $email, $cod, $fecha, $estado, $tbs, $tusd, $items_json
+                $tipo, $numero, $rif, $email, $cod, $fecha_sql, $rec_sql, $estado, $tbs, $tusd, $vendedor, $dias_ven, $doc_origin, $items_json
             ) );
 
             if ( false === $result ) {
@@ -2172,87 +2277,699 @@ class ADN_Productos_Plugin {
         }
 
         $table  = $wpdb->prefix . 'adn_orders';
-        $orders = $wpdb->get_results( $wpdb->prepare(
-            "SELECT * FROM `{$table}` WHERE adn_rif = %s ORDER BY fecha DESC LIMIT 100",
+        $all    = $wpdb->get_results( $wpdb->prepare(
+            "SELECT * FROM `{$table}` WHERE adn_rif = %s ORDER BY fecha DESC LIMIT 200",
             $rif
         ) );
 
-        if ( empty( $orders ) ) {
-            echo '<p>No se encontraron documentos de venta registrados para tu cuenta (RIF: ' . esc_html( $rif ) . ').</p>';
-            return;
+        // Separar en PEDIDOS y DOCUMENTOS
+        $pedidos     = [];
+        $documentos  = [];
+        foreach ( $all as $row ) {
+            if ( $row->adn_tipo === 'PED' ) {
+                $pedidos[] = $row;
+            } else {
+                $documentos[] = $row;
+            }
         }
 
         $tipo_labels = [
             'PEDW' => 'Pedido Web',
             'PED'  => 'Pedido',
+            'DPED' => 'Devolución Pedido',
+            'PEDV' => 'Pedido de Venta',
             'FAC'  => 'Factura',
             'FACO' => 'Factura (Copia)',
         ];
 
         ?>
-        <h2>Mis Documentos de Venta ADN</h2>
-        <p style="color:#666;font-size:.9em;">RIF: <?php echo esc_html( $rif ); ?></p>
+        <h2>Mis Pedidos y Documentos ADN</h2>
+        <p style="color:#666;font-size:.9em;">RIF registrado: <strong><?php echo esc_html( $rif ); ?></strong></p>
 
         <style>
-        .adn-orders-table { width:100%; border-collapse:collapse; font-size:.9em; }
-        .adn-orders-table th { background:#f5f5f5; padding:8px 10px; text-align:left; border-bottom:2px solid #ddd; }
+        .adn-orders-table { width:100%; border-collapse:collapse; font-size:.9em; margin-bottom:2em; }
+        .adn-orders-table th { background:#f0f4ff; padding:9px 10px; text-align:left; border-bottom:2px solid #c5d0f5; white-space:nowrap; }
         .adn-orders-table td { padding:8px 10px; border-bottom:1px solid #eee; vertical-align:top; }
-        .adn-orders-table tr:hover td { background:#fafafa; }
-        .adn-tipo-badge { display:inline-block; padding:2px 7px; border-radius:3px; font-size:.8em; font-weight:600; background:#e8f0fe; color:#1a56db; }
-        .adn-orders-items { font-size:.85em; color:#555; margin:4px 0 0; }
-        .adn-orders-items li { margin:2px 0; }
-        .adn-total { font-weight:600; white-space:nowrap; }
+        .adn-orders-table tr:hover td { background:#f9fbff; }
+        .adn-tipo-badge { display:inline-block; padding:2px 8px; border-radius:4px; font-size:.78em; font-weight:700;
+                          background:#e8f0fe; color:#1a56db; letter-spacing:.03em; }
+        .adn-tipo-badge.pedv { background:#fff3cd; color:#856404; }
+        .adn-tipo-badge.fac  { background:#d1e7dd; color:#0a5233; }
+        .adn-tipo-badge.dped { background:#fde8e8; color:#9b1c1c; }
+        .adn-orders-items { font-size:.84em; color:#555; margin:5px 0 0; padding-left:1em; }
+        .adn-orders-items li { margin:3px 0; }
+        .adn-neto  { font-weight:700; white-space:nowrap; color:#111; }
+        .adn-estado-pen  { color:#856404; font-weight:600; }
+        .adn-estado-act  { color:#0a5233; font-weight:600; }
+        .adn-estado-pag  { color:#0a5233; font-weight:600; }
+        .adn-estado-anu  { color:#9b1c1c; font-weight:600; }
+        .adn-section-title { margin:1.5em 0 .5em; font-size:1.1em; border-bottom:2px solid #0073aa;
+                             padding-bottom:6px; color:#0073aa; }
         details summary { cursor:pointer; color:#0073aa; }
+        details summary:hover { text-decoration:underline; }
+        .adn-vacio { color:#888; font-style:italic; }
+        .adn-table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; margin-bottom:2em; }
+        .adn-table-wrap .adn-orders-table { margin-bottom:0; min-width:900px; }
         </style>
 
-        <table class="adn-orders-table">
-            <thead>
-                <tr>
-                    <th>Nº Documento</th>
-                    <th>Tipo</th>
-                    <th>Fecha</th>
-                    <th>Estado</th>
-                    <th>Total Bs</th>
-                    <th>Total USD</th>
-                    <th>Artículos</th>
-                </tr>
-            </thead>
-            <tbody>
-            <?php foreach ( $orders as $order ) :
-                $items = json_decode( $order->items_json, true ) ?: [];
-                $tipo_label = $tipo_labels[ $order->adn_tipo ] ?? $order->adn_tipo;
-                $fecha_fmt  = date_i18n( 'd/m/Y H:i', strtotime( $order->fecha ) );
-            ?>
-                <tr>
-                    <td><strong><?php echo esc_html( $order->adn_numero ); ?></strong></td>
-                    <td><span class="adn-tipo-badge"><?php echo esc_html( $tipo_label ); ?></span></td>
-                    <td><?php echo esc_html( $fecha_fmt ); ?></td>
-                    <td><?php echo esc_html( $order->estado ?: '—' ); ?></td>
-                    <td class="adn-total"><?php echo number_format( (float) $order->total_bs, 2, ',', '.' ); ?> Bs</td>
-                    <td class="adn-total">$ <?php echo number_format( (float) $order->total_usd, 2, ',', '.' ); ?></td>
-                    <td>
-                        <?php if ( ! empty( $items ) ) : ?>
-                        <details>
-                            <summary><?php echo count( $items ); ?> ítem(s)</summary>
-                            <ul class="adn-orders-items">
-                            <?php foreach ( $items as $item ) : ?>
-                                <li>
-                                    <?php echo esc_html( $item['descripcion'] ?: $item['sku'] ); ?>
-                                    — <?php echo esc_html( number_format( (float) $item['cantidad'], 0 ) ); ?> x
-                                    $<?php echo esc_html( number_format( (float) $item['precio_usd'], 2 ) ); ?>
-                                </li>
-                            <?php endforeach; ?>
-                            </ul>
-                        </details>
-                        <?php else : ?>
-                        —
-                        <?php endif; ?>
-                    </td>
-                </tr>
-            <?php endforeach; ?>
-            </tbody>
-        </table>
         <?php
+        // ─── Helper: formatear fecha segura ─────────────────────────────────
+        $fmt_date = function ( ?string $val ): string {
+            if ( ! $val || str_starts_with( $val, '0000-' ) ) { return '—'; }
+            $ts = strtotime( $val );
+            return ( $ts && $ts > 0 ) ? date_i18n( 'd/m/Y', $ts ) : '—';
+        };
+
+        // ─── Tabla reutilizable ──────────────────────────────────────────────
+        $render_table = function ( array $rows ) use ( $tipo_labels, $fmt_date ) {
+            if ( empty( $rows ) ) {
+                echo '<p class="adn-vacio">Sin registros.</p>';
+                return;
+            }
+            echo '<div class="adn-table-wrap"><table class="adn-orders-table"><thead><tr>';
+            echo '<th>Tipo</th>';
+            echo '<th>Número</th>';
+            echo '<th>Fecha</th>';
+            echo '<th>Recepción</th>';
+            echo '<th>Neto Bs</th>';
+            echo '<th>Pagado</th>';
+            echo '<th>Saldo</th>';
+            echo '<th>Estado</th>';
+            echo '<th>Artículos</th>';
+            echo '</tr></thead><tbody>';
+
+            foreach ( $rows as $order ) :
+                $items      = json_decode( $order->items_json, true ) ?: [];
+                $tipo_label = $tipo_labels[ $order->adn_tipo ] ?? $order->adn_tipo;
+                $fecha_fmt  = $fmt_date( $order->fecha    ?? '' );
+                $rec_fmt    = $fmt_date( $order->recepcion ?? '' );
+                $neto       = (float) ( $order->total_bs ?? 0 );
+                $pagado     = 0.00;
+                $saldo      = $neto - $pagado;
+                $estado     = strtoupper( $order->estado ?: '—' );
+                $estado_cls = in_array( $estado, [ 'ACTIVO', 'ACT', 'A' ], true ) ? 'adn-estado-act'
+                            : ( 'PAGADO' === $estado ? 'adn-estado-pag'
+                            : ( 'ANULADO' === $estado ? 'adn-estado-anu'
+                            : ( in_array( $estado, [ 'PEN', 'PENDIENTE', 'P' ], true ) ? 'adn-estado-pen' : '' ) ) );
+                $tipo_cls   = ( 'PEDV' === $order->adn_tipo ) ? 'pedv'
+                            : ( 'DPED' === $order->adn_tipo ? 'dped'
+                            : ( in_array( $order->adn_tipo, [ 'FAC', 'FACO' ], true ) ? 'fac' : '' ) );
+                echo '<tr>';
+                echo '<td><span class="adn-tipo-badge ' . esc_attr( $tipo_cls ) . '">' . esc_html( $tipo_label ) . '</span></td>';
+                echo '<td><strong>' . esc_html( $order->adn_numero ) . '</strong></td>';
+                echo '<td>' . esc_html( $fecha_fmt ) . '</td>';
+                echo '<td>' . esc_html( $rec_fmt ) . '</td>';
+                echo '<td class="adn-neto">' . number_format( $neto,   2, ',', '.' ) . ' Bs</td>';
+                echo '<td class="adn-neto">' . number_format( $pagado, 2, ',', '.' ) . ' Bs</td>';
+                echo '<td class="adn-neto">' . number_format( $saldo,  2, ',', '.' ) . ' Bs</td>';
+                echo '<td class="' . esc_attr( $estado_cls ) . '">' . esc_html( $estado ) . '</td>';
+                echo '<td>';
+                if ( ! empty( $items ) ) {
+                    echo '<details><summary>' . count( $items ) . ' ítem(s)</summary><ul class="adn-orders-items">';
+                    foreach ( $items as $item ) {
+                        $desc = trim( $item['descripcion'] ?? '' ) ?: ( $item['sku'] ?? '—' );
+                        $qty  = number_format( (float) ( $item['cantidad'] ?? 0 ), 0, ',', '.' );
+                        $pr   = number_format( (float) ( $item['precio']   ?? 0 ), 2, ',', '.' );
+                        echo '<li>' . esc_html( $desc ) . ' — ' . esc_html( $qty ) . ' x Bs ' . esc_html( $pr ) . '</li>';
+                    }
+                    echo '</ul></details>';
+                } else {
+                    echo '—';
+                }
+                echo '</td></tr>';
+            endforeach;
+
+            echo '</tbody></table></div>';
+        };
+        // ─────────────────────────────────────────────────────────────────────
+        ?>
+
+        <h3 class="adn-section-title">Pedidos (<?php echo count( $pedidos ); ?>)</h3>
+        <?php $render_table( $pedidos ); ?>
+
+        <h3 class="adn-section-title">Documentos de Venta (<?php echo count( $documentos ); ?>)</h3>
+        <?php $render_table( $documentos ); ?>
+
+        <?php
+    }
+
+    // ─── WP Menu Cart: mini cart items ───────────────────────────────────────────────
+
+    public function wpmenucart_inject_items(): void {
+        if ( ! class_exists( 'WooCommerce' ) ) {
+            return;
+        }
+        ?>
+        <div id="adn-wc-mini-cart-source" style="display:none!important;visibility:hidden!important;position:absolute;left:-9999px">
+            <div class="widget_shopping_cart_content">
+                <?php woocommerce_mini_cart(); ?>
+            </div>
+        </div>
+        <?php
+    }
+
+    // ─── Recetas: CPT ──────────────────────────────────────────────────────────────────
+
+    /**
+     * Inyecta los campos de la receta en la página individual (single receta).
+     * Layout: hero 2-col (video | info+meta) + panel 2-col (ingredientes | preparación).
+     */
+    public function receta_single_content( string $content ): string {
+        if ( ! is_singular( 'receta' ) || ! in_the_loop() || ! is_main_query() ) {
+            return $content;
+        }
+
+        static $rendering = false;
+        if ( $rendering ) { return $content; }
+        $rendering = true;
+
+        $post_id      = get_the_ID();
+        $tiempo       = get_post_meta( $post_id, '_receta_tiempo',        true );
+        $porciones    = get_post_meta( $post_id, '_receta_porciones',     true );
+        $dificultad   = get_post_meta( $post_id, '_receta_dificultad',    true );
+        $ingredientes = get_post_meta( $post_id, '_receta_ingredientes',  true );
+        $preparacion  = get_post_meta( $post_id, '_receta_preparacion',   true );
+        $youtube      = get_post_meta( $post_id, '_receta_youtube',       true );
+        $excerpt      = get_post_field( 'post_excerpt', $post_id );
+
+        $lineas_ingr = $ingredientes
+            ? array_values( array_filter( array_map( 'trim', explode( "\n", $ingredientes ) ) ) )
+            : [];
+        $pasos = $preparacion
+            ? array_values( array_filter( array_map( 'trim', explode( "\n", $preparacion ) ) ) )
+            : [];
+
+        $yt_id = '';
+        if ( $youtube && preg_match( '/(?:v=|youtu\.be\/)([\w-]{11})/', $youtube, $m ) ) {
+            $yt_id = $m[1];
+        }
+        $thumb = get_the_post_thumbnail_url( $post_id, 'large' );
+
+        $terminos   = get_the_terms( $post_id, 'categoria_receta' );
+        $categorias = ( $terminos && ! is_wp_error( $terminos ) )
+            ? implode( ' · ', array_map( 'esc_html', wp_list_pluck( $terminos, 'name' ) ) )
+            : '';
+
+        $dif_tx = [ 'Alta' => '#e74c3c', 'Media' => '#e67e22', 'Baja' => '#27ae60' ];
+        $dif_color = $dif_tx[ $dificultad ] ?? '#555';
+
+        ob_start();
+        ?>
+        <style>
+        @media (min-width: 960px) {
+            .neve-main > .single-post-container .nv-single-post-wrap.col,
+            .neve-main > .container .col {
+                max-width: 100% !important;
+                padding-left: 0 !important;
+                padding-right: 0 !important;
+            }
+        }
+        .rf-wrap { font-family: inherit; margin: 0 0 2.5rem; }
+
+        /* ── HERO ───────────────────────────────────────────────── */
+        .rf-hero {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0;
+            background: #f4f5f9;
+            margin-bottom: 0;
+        }
+        @media(max-width:700px){ .rf-hero { grid-template-columns: 1fr; } }
+
+        .rf-hero-video {
+            position: relative; background: #c5cae9;
+            min-height: 280px;
+        }
+        .rf-hero-video iframe,
+        .rf-hero-video img {
+            position: absolute; inset: 0;
+            width: 100%; height: 100%;
+            object-fit: cover; border: 0;
+        }
+        .rf-hero-video .rf-no-media {
+            position: absolute; inset: 0;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 4rem; color: #9fa8da;
+        }
+
+        .rf-hero-info {
+            padding: 2rem 2rem 1.5rem;
+            display: flex; flex-direction: column; justify-content: space-between;
+            background: #f4f5f9;
+        }
+        .rf-categoria {
+            font-size: .75em; letter-spacing: .12em; text-transform: uppercase;
+            color: #888; margin-bottom: .5rem;
+        }
+        .rf-titulo {
+            font-size: 2em; font-weight: 800; line-height: 1.15;
+            margin: 0 0 .5rem; color: #111; text-transform: uppercase;
+        }
+        .rf-descripcion {
+            font-size: .95em; color: #555; margin: 0 0 1.5rem; line-height: 1.55;
+        }
+
+        .rf-meta-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: .5rem;
+            border-top: 1px solid #dde;
+            padding-top: 1rem; margin-top: auto;
+        }
+        @media(max-width:500px){ .rf-meta-row { grid-template-columns: repeat(2, 1fr); } }
+        .rf-meta-item {
+            display: flex; flex-direction: column; align-items: flex-start;
+        }
+        .rf-meta-label {
+            font-size: .7em; letter-spacing: .1em; text-transform: uppercase;
+            color: #999; margin-bottom: 3px;
+        }
+        .rf-meta-value {
+            font-size: .92em; font-weight: 700; color: #222;
+        }
+        .rf-meta-value.dif { }
+
+        /* ── PANELS ─────────────────────────────────────────────── */
+        .rf-panels {
+            display: grid;
+            grid-template-columns: 2fr 3fr;
+            gap: 4px;
+            background: #f4f5f9;
+        }
+        @media(max-width:700px){ .rf-panels { grid-template-columns: 1fr; } }
+
+        .rf-panel {
+            background: #3F51B5;
+            color: #fff;
+            padding: 2rem 1.8rem;
+            min-height: 360px;
+        }
+        .rf-panel-title {
+            font-size: .72em; letter-spacing: .15em; text-transform: uppercase;
+            font-weight: 700; color: rgba(255,255,255,.7);
+            margin: 0 0 1.2rem;
+        }
+        .rf-ingr-list {
+            list-style: none; padding: 0; margin: 0;
+        }
+        .rf-ingr-list li {
+            padding: .45rem 0;
+            border-bottom: 1px solid rgba(255,255,255,.15);
+            font-size: .92em; line-height: 1.4;
+        }
+        .rf-ingr-list li:last-child { border-bottom: none; }
+
+        .rf-pasos-list {
+            list-style: none; padding: 0; margin: 0; counter-reset: paso;
+        }
+        .rf-pasos-list li {
+            counter-increment: paso;
+            display: flex; gap: .9rem;
+            padding: .65rem 0;
+            border-bottom: 1px solid rgba(255,255,255,.12);
+            font-size: .92em; line-height: 1.5; align-items: flex-start;
+        }
+        .rf-pasos-list li:last-child { border-bottom: none; }
+        .rf-pasos-list li::before {
+            content: counter(paso);
+            flex-shrink: 0;
+            width: 24px; height: 24px;
+            background: rgba(255,255,255,.25);
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: .78em; font-weight: 800;
+        }
+        </style>
+
+        <div class="rf-wrap">
+
+            <!-- HERO -->
+            <div class="rf-hero">
+                <div class="rf-hero-video">
+                    <?php if ( $yt_id ) : ?>
+                        <iframe src="https://www.youtube-nocookie.com/embed/<?php echo esc_attr( $yt_id ); ?>?rel=0"
+                                title="Video" allowfullscreen loading="lazy"></iframe>
+                    <?php elseif ( $thumb ) : ?>
+                        <img src="<?php echo esc_url( $thumb ); ?>" alt="<?php echo esc_attr( get_the_title() ); ?>">
+                    <?php else : ?>
+                        <div class="rf-no-media">🍽️</div>
+                    <?php endif; ?>
+                </div>
+
+                <div class="rf-hero-info">
+                    <?php if ( $categorias ) : ?>
+                    <p class="rf-categoria"><?php echo $categorias; ?></p>
+                    <?php endif; ?>
+                    <h1 class="rf-titulo"><?php echo esc_html( get_the_title() ); ?></h1>
+                    <?php if ( $excerpt ) : ?>
+                    <p class="rf-descripcion"><?php echo esc_html( $excerpt ); ?></p>
+                    <?php endif; ?>
+
+                    <div class="rf-meta-row">
+                        <?php if ( $dificultad ) : ?>
+                        <div class="rf-meta-item">
+                            <span class="rf-meta-label">Dificultad</span>
+                            <span class="rf-meta-value dif" style="color:<?php echo esc_attr($dif_color); ?>"><?php echo esc_html( $dificultad ); ?></span>
+                        </div>
+                        <?php endif; ?>
+                        <?php if ( $lineas_ingr ) : ?>
+                        <div class="rf-meta-item">
+                            <span class="rf-meta-label">Ingredientes</span>
+                            <span class="rf-meta-value"><?php echo count( $lineas_ingr ); ?></span>
+                        </div>
+                        <?php endif; ?>
+                        <?php if ( $tiempo ) : ?>
+                        <div class="rf-meta-item">
+                            <span class="rf-meta-label">Tiempo</span>
+                            <span class="rf-meta-value"><?php echo esc_html( $tiempo ); ?></span>
+                        </div>
+                        <?php endif; ?>
+                        <?php if ( $porciones ) : ?>
+                        <div class="rf-meta-item">
+                            <span class="rf-meta-label">Porciones</span>
+                            <span class="rf-meta-value"><?php echo esc_html( $porciones ); ?></span>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PANELS -->
+            <?php if ( $lineas_ingr || $pasos ) : ?>
+            <div class="rf-panels">
+
+                <?php if ( $lineas_ingr ) : ?>
+                <div class="rf-panel">
+                    <p class="rf-panel-title">Ingredientes</p>
+                    <ul class="rf-ingr-list">
+                        <?php foreach ( $lineas_ingr as $ingr ) : ?>
+                        <li><?php echo esc_html( $ingr ); ?></li>
+                        <?php endforeach; ?>
+                    </ul>
+                </div>
+                <?php endif; ?>
+
+                <?php if ( $pasos ) : ?>
+                <div class="rf-panel">
+                    <p class="rf-panel-title">Preparación</p>
+                    <ol class="rf-pasos-list">
+                        <?php foreach ( $pasos as $paso ) : ?>
+                        <li><?php echo esc_html( $paso ); ?></li>
+                        <?php endforeach; ?>
+                    </ol>
+                </div>
+                <?php endif; ?>
+
+            </div>
+            <?php endif; ?>
+
+        </div>
+        <?php
+        $rendering = false;
+        return ob_get_clean();
+    }
+
+    public function register_receta_post_type(): void {
+        register_post_type( 'receta', [
+            'labels' => [
+                'name'               => 'Recetas',
+                'singular_name'      => 'Receta',
+                'add_new'            => 'Añadir nueva',
+                'add_new_item'       => 'Añadir nueva receta',
+                'edit_item'          => 'Editar receta',
+                'new_item'           => 'Nueva receta',
+                'view_item'          => 'Ver receta',
+                'search_items'       => 'Buscar recetas',
+                'not_found'          => 'No se encontraron recetas',
+                'not_found_in_trash' => 'No hay recetas en la papelera',
+                'menu_name'          => 'Recetas',
+            ],
+            'public'       => true,
+            'show_in_menu' => true,
+            'menu_icon'    => 'dashicons-food',
+            'supports'     => [ 'title', 'editor', 'thumbnail', 'excerpt' ],
+            'has_archive'  => false,
+            'rewrite'      => [ 'slug' => 'receta' ],
+            'show_in_rest' => true,
+        ] );
+
+        register_taxonomy( 'categoria_receta', 'receta', [
+            'labels'       => [
+                'name'          => 'Categorías de Recetas',
+                'singular_name' => 'Categoría',
+                'add_new_item'  => 'Añadir categoría',
+                'edit_item'     => 'Editar categoría',
+            ],
+            'hierarchical' => true,
+            'show_ui'      => true,
+            'show_in_rest' => true,
+            'rewrite'      => [ 'slug' => 'categoria-receta' ],
+        ] );
+    }
+
+    public function receta_meta_boxes(): void {
+        add_meta_box(
+            'adn_receta_datos',
+            'Datos de la Receta',
+            function ( $post ) {
+                wp_nonce_field( 'adn_receta_save', 'adn_receta_nonce' );
+                $tiempo       = get_post_meta( $post->ID, '_receta_tiempo',        true );
+                $porciones    = get_post_meta( $post->ID, '_receta_porciones',     true );
+                $dificultad   = get_post_meta( $post->ID, '_receta_dificultad',    true );
+                $ingredientes = get_post_meta( $post->ID, '_receta_ingredientes',  true );
+                $preparacion  = get_post_meta( $post->ID, '_receta_preparacion',   true );
+                $youtube      = get_post_meta( $post->ID, '_receta_youtube',       true );
+                ?>
+                <style>
+                .receta-mb td { padding: 8px 10px; vertical-align: top; }
+                .receta-mb input[type=text], .receta-mb select, .receta-mb textarea { width:100%; box-sizing:border-box; }
+                .receta-mb textarea { resize: vertical; }
+                .receta-mb label strong { display:block; margin-bottom:4px; }
+                </style>
+                <table class="receta-mb" style="width:100%;border-collapse:collapse">
+                    <tr>
+                        <td style="width:34%">
+                            <label><strong>Tiempo de preparación</strong>
+                            <input type="text" name="_receta_tiempo" value="<?php echo esc_attr($tiempo); ?>"
+                                   placeholder="Ej: 1:30 horas"></label>
+                        </td>
+                        <td style="width:33%">
+                            <label><strong>Porciones</strong>
+                            <input type="text" name="_receta_porciones" value="<?php echo esc_attr($porciones); ?>"
+                                   placeholder="Ej: 4-6"></label>
+                        </td>
+                        <td style="width:33%">
+                            <label><strong>Dificultad</strong>
+                            <select name="_receta_dificultad">
+                                <option value="">Seleccionar...</option>
+                                <?php foreach ( ['Alta','Media','Baja'] as $d ) : ?>
+                                <option value="<?php echo esc_attr($d); ?>" <?php selected($dificultad,$d); ?>><?php echo esc_html($d); ?></option>
+                                <?php endforeach; ?>
+                            </select></label>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td colspan="3">
+                            <label><strong>Video de YouTube (URL)</strong>
+                            <input type="text" name="_receta_youtube" value="<?php echo esc_attr($youtube); ?>"
+                                   placeholder="Ej: https://www.youtube.com/watch?v=XXXXX"></label>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td colspan="3">
+                            <label><strong>Ingredientes</strong> <span style="color:#888;font-weight:400">(un ingrediente por línea)</span><br>
+                            <textarea name="_receta_ingredientes" rows="6"><?php echo esc_textarea($ingredientes); ?></textarea></label>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td colspan="3">
+                            <label><strong>Preparación</strong> <span style="color:#888;font-weight:400">(pasos del procedimiento)</span><br>
+                            <textarea name="_receta_preparacion" rows="8"><?php echo esc_textarea($preparacion); ?></textarea></label>
+                        </td>
+                    </tr>
+                </table>
+                <?php
+            },
+            'receta', 'normal', 'high'
+        );
+    }
+
+    public function receta_save_meta( int $post_id, \WP_Post $post ): void {
+        if ( ! isset( $_POST['adn_receta_nonce'] ) ||
+             ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['adn_receta_nonce'] ) ), 'adn_receta_save' ) ) {
+            return;
+        }
+        if ( defined( 'DOING_AUTOSAVE' ) && DOING_AUTOSAVE ) { return; }
+        if ( ! current_user_can( 'edit_post', $post_id ) ) { return; }
+
+        $fields = [ '_receta_tiempo', '_receta_porciones', '_receta_dificultad', '_receta_ingredientes', '_receta_preparacion', '_receta_youtube' ];
+        foreach ( $fields as $field ) {
+            if ( isset( $_POST[ $field ] ) ) {
+                update_post_meta( $post_id, $field, sanitize_textarea_field( wp_unslash( $_POST[ $field ] ) ) );
+            }
+        }
+    }
+
+    /**
+     * Shortcode [adn_recetas columns="3" limit="12"]
+     */
+    public function render_recetas_shortcode( $atts ): string {
+        $atts = shortcode_atts( [
+            'columns' => 3,
+            'limit'   => 12,
+        ], $atts, 'adn_recetas' );
+
+        $columns = max( 1, (int) $atts['columns'] );
+        $limit   = max( 1, (int) $atts['limit'] );
+
+        $query = new WP_Query( [
+            'post_type'      => 'receta',
+            'post_status'    => 'publish',
+            'posts_per_page' => $limit,
+            'orderby'        => 'date',
+            'order'          => 'DESC',
+            'no_found_rows'  => true,
+        ] );
+
+        if ( ! $query->have_posts() ) {
+            return '<p class="adn-recetas-vacio">No hay recetas publicadas.</p>';
+        }
+
+        $dificultad_colores = [
+            'Alta'  => '#f8d7da',
+            'Media' => '#fff3cd',
+            'Baja'  => '#d1e7dd',
+        ];
+        $dificultad_texto = [
+            'Alta'  => '#842029',
+            'Media' => '#856404',
+            'Baja'  => '#0a5233',
+        ];
+
+        ob_start();
+        ?>
+        <style>
+        .adn-recetas-grid {
+            display: grid;
+            grid-template-columns: repeat(<?php echo $columns; ?>, 1fr);
+            gap: 1.5rem;
+            margin: 1.5rem 0;
+        }
+        @media (max-width: 900px) { .adn-recetas-grid { grid-template-columns: repeat(2, 1fr); } }
+        @media (max-width: 600px) { .adn-recetas-grid { grid-template-columns: 1fr; } }
+        .adn-receta-card {
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 2px 12px rgba(0,0,0,.08);
+            overflow: hidden;
+            transition: transform .2s, box-shadow .2s;
+            display: flex;
+            flex-direction: column;
+        }
+        .adn-receta-card:hover { transform: translateY(-4px); box-shadow: 0 6px 24px rgba(0,0,0,.13); }
+        .adn-receta-img-wrap { position: relative; aspect-ratio: 4/3; overflow: hidden; background: #f0f0f0; }
+        .adn-receta-img-wrap img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .adn-receta-img-wrap .adn-receta-dif {
+            position: absolute; top: 10px; right: 10px;
+            padding: 3px 10px; border-radius: 20px; font-size: .75em; font-weight: 700;
+        }
+        .adn-receta-body { padding: 1rem 1.1rem; flex: 1; display: flex; flex-direction: column; }
+        .adn-receta-title {
+            font-size: 1.05em; font-weight: 700; margin: 0 0 .5rem;
+            color: #111; line-height: 1.3;
+        }
+        .adn-receta-title a { color: inherit; text-decoration: none; }
+        .adn-receta-title a:hover { color: #c8121a; }
+        .adn-receta-excerpt { font-size: .88em; color: #555; flex: 1; margin-bottom: .8rem; line-height: 1.5; }
+        .adn-receta-meta {
+            display: flex; gap: .8rem; flex-wrap: wrap;
+            font-size: .8em; color: #777; border-top: 1px solid #eee; padding-top: .7rem; margin-top: auto;
+        }
+        .adn-receta-meta span { display: flex; align-items: center; gap: 4px; }
+        .adn-receta-meta svg { flex-shrink: 0; }
+        .adn-receta-btn {
+            display: inline-block; margin-top: .9rem;
+            background: #c8121a; color: #fff; padding: 7px 18px;
+            border-radius: 6px; font-size: .85em; font-weight: 600; text-decoration: none;
+        }
+        .adn-receta-btn:hover { background: #a00e14; color: #fff; }
+        .adn-recetas-vacio { color: #888; font-style: italic; }
+        </style>
+
+        <div class="adn-recetas-grid">
+        <?php while ( $query->have_posts() ) : $query->the_post();
+            $post_id      = get_the_ID();
+            $permalink    = get_permalink();
+            $title        = get_the_title();
+            $excerpt      = get_the_excerpt();
+            $tiempo       = get_post_meta( $post_id, '_receta_tiempo',     true );
+            $porciones    = get_post_meta( $post_id, '_receta_porciones',  true );
+            $dificultad   = get_post_meta( $post_id, '_receta_dificultad', true );
+            $youtube      = get_post_meta( $post_id, '_receta_youtube',    true );
+            $yt_id        = '';
+            if ( $youtube && preg_match( '/(?:v=|youtu\.be\/)([\w-]{11})/', $youtube, $m ) ) {
+                $yt_id = $m[1];
+            }
+            $thumb        = $yt_id
+                            ? "https://img.youtube.com/vi/{$yt_id}/hqdefault.jpg"
+                            : get_the_post_thumbnail_url( $post_id, 'medium_large' );
+            $dif_bg       = $dificultad_colores[ $dificultad ] ?? '';
+            $dif_color    = $dificultad_texto[ $dificultad ] ?? '#333';
+        ?>
+            <article class="adn-receta-card">
+                <div class="adn-receta-img-wrap">
+                    <?php if ( $thumb ) : ?>
+                        <a href="<?php echo esc_url( $permalink ); ?>" style="position:relative;display:block">
+                            <img src="<?php echo esc_url( $thumb ); ?>" alt="<?php echo esc_attr( $title ); ?>" loading="lazy">
+                            <?php if ( $yt_id ) : ?>
+                            <span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">
+                                <svg width="54" height="38" viewBox="0 0 54 38" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <rect width="54" height="38" rx="8" fill="#FF0000" fill-opacity=".9"/>
+                                    <polygon points="21,10 21,28 38,19" fill="white"/>
+                                </svg>
+                            </span>
+                            <?php endif; ?>
+                        </a>
+                    <?php else : ?>
+                        <div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:#aaa;font-size:3rem">🍽️</div>
+                    <?php endif; ?>
+                    <?php if ( $dificultad ) : ?>
+                        <span class="adn-receta-dif" style="background:<?php echo esc_attr($dif_bg); ?>;color:<?php echo esc_attr($dif_color); ?>">
+                            <?php echo esc_html( $dificultad ); ?>
+                        </span>
+                    <?php endif; ?>
+                </div>
+                <div class="adn-receta-body">
+                    <h3 class="adn-receta-title">
+                        <a href="<?php echo esc_url( $permalink ); ?>"><?php echo esc_html( $title ); ?></a>
+                    </h3>
+                    <?php if ( $excerpt ) : ?>
+                        <p class="adn-receta-excerpt"><?php echo esc_html( $excerpt ); ?></p>
+                    <?php endif; ?>
+                    <?php if ( $tiempo || $porciones ) : ?>
+                    <div class="adn-receta-meta">
+                        <?php if ( $tiempo ) : ?>
+                        <span>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                            <?php echo esc_html( $tiempo ); ?>
+                        </span>
+                        <?php endif; ?>
+                        <?php if ( $porciones ) : ?>
+                        <span>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                            <?php echo esc_html( $porciones ); ?>
+                        </span>
+                        <?php endif; ?>
+                    </div>
+                    <?php endif; ?>
+                    <a href="<?php echo esc_url( $permalink ); ?>" class="adn-receta-btn">Ver receta</a>
+                </div>
+            </article>
+        <?php endwhile;
+        wp_reset_postdata(); ?>
+        </div>
+        <?php
+        return ob_get_clean();
     }
 }
 

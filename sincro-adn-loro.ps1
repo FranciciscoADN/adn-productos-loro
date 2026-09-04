@@ -432,6 +432,11 @@ ORDER BY c.CLT_CODIGO;
             $total_updated += $resp.updated
             $total_errors  += $resp.errors
             Write-Log "  → created=$($resp.created) updated=$($resp.updated) errors=$($resp.errors)"
+            if ($resp.errors -gt 0 -and $resp.error_details) {
+                foreach ($detail in $resp.error_details) {
+                    Write-Log "     !! $detail"
+                }
+            }
         } else {
             Write-Log "  → ERROR: sin respuesta del servidor"
             $total_errors += $lote.Count
@@ -763,29 +768,41 @@ function Sync-PedidosADN {
 
     $sql = @"
 SELECT
-    dc.DCL_TDT_CODIGO                                    AS tipo,
-    TRIM(dc.DCL_NUMERO)                                  AS numero,
-    dc.DCL_FECHAHORA                                     AS fecha,
-    TRIM(dc.DCL_CLT_CODIGO)                              AS cliente_codigo,
-    TRIM(c.CLT_RIF)                                      AS rif,
-    TRIM(COALESCE(c.CLT_EMAILWEB, c.CLT_EMAIL, ''))      AS email,
-    COALESCE(dc.DCL_TOTAL, 0)                            AS total_bs,
-    COALESCE(dc.DCL_TOTALME, 0)                          AS total_usd,
-    TRIM(COALESCE(dc.DCL_ESTADO, ''))                    AS estado,
-    TRIM(COALESCE(mc.MCL_PDT_CODIGO, ''))                AS sku,
-    REPLACE(TRIM(COALESCE(mc.MCL_DESCRIPCION, '')), '"', '') AS descripcion,
-    COALESCE(mc.MCL_CANTIDAD, 0)                         AS cantidad,
-    COALESCE(mc.MCL_PRECIO, 0)                           AS precio,
-    COALESCE(mc.MCL_PRECIOME, 0)                         AS precio_usd
+    dc.DCL_TDT_CODIGO                                                                AS tipo,
+    TRIM(dc.DCL_NUMERO)                                                              AS numero,
+    COALESCE(NULLIF(dc.DCL_FECHA,    '0000-00-00'), '')                              AS fecha,
+    COALESCE(NULLIF(dc.DCL_FECHAREC, '0000-00-00'), '')                              AS recepcion,
+    TRIM(dc.DCL_CLT_CODIGO)                                                          AS cliente_codigo,
+    TRIM(c.CLT_RIF)                                                                  AS rif,
+    TRIM(COALESCE(c.CLT_EMAILWEB, c.CLT_EMAIL, ''))                                  AS email,
+    COALESCE(dc.DCL_NETO, 0)                                                         AS total_bs,
+    COALESCE(dc.DCL_NETOUSD, 0)                                                      AS total_usd,
+    CASE
+        WHEN dc.DCL_ACTIVO = 0              THEN 'ANULADO'
+        WHEN dc.DCL_STD_ESTADO = 'PAG'      THEN 'PAGADO'
+        WHEN dc.DCL_STD_ESTADO = 'NUL'      THEN 'ANULADO'
+        WHEN dc.DCL_ACTIVO = 1              THEN 'ACTIVO'
+        ELSE TRIM(COALESCE(dc.DCL_STD_ESTADO,''))
+    END                                                                              AS estado,
+    TRIM(COALESCE(dc.DCL_VEN_CODIGO, ''))                                            AS vendedor,
+    COALESCE(dc.DCL_DIAS_INTERVALO, 0)                                               AS dias_ven,
+    CONCAT(TRIM(COALESCE(dc.DCL_TDT_ORIGEN,'')),
+           IF(TRIM(COALESCE(dc.DCL_ORIGENNUM,'')) <> '',
+              CONCAT(':', TRIM(dc.DCL_ORIGENNUM)), ''))                              AS doc_origin,
+    TRIM(COALESCE(mc.MCL_UPP_PDT_CODIGO, ''))                                        AS sku,
+    REPLACE(TRIM(COALESCE(mc.MCL_DESCRI, '')), '"', '')                              AS descripcion,
+    COALESCE(mc.MCL_CANTIDAD, 0)                                                     AS cantidad,
+    COALESCE(mc.MCL_BASE, 0)                                                         AS precio,
+    COALESCE(mc.MCL_PRECIOUSD, 0)                                                    AS precio_usd
 FROM ADN_DOCCLI dc
 JOIN adn_clientes c  ON dc.DCL_CLT_CODIGO = c.CLT_CODIGO
 JOIN ADN_MOVCLI mc   ON mc.MCL_DCL_NUMERO = dc.DCL_NUMERO
-                     AND mc.MCL_TDT_CODIGO = dc.DCL_TDT_CODIGO
-WHERE dc.DCL_TDT_CODIGO IN ('PEDW','PED','FAC','FACO')
-  AND dc.DCL_FECHAHORA >= DATE_SUB(NOW(), INTERVAL 365 DAY)
+                     AND mc.MCL_DCL_TDT_CODIGO = dc.DCL_TDT_CODIGO
+WHERE dc.DCL_FECHA >= DATE_SUB(CURDATE(), INTERVAL 365 DAY)
+  AND (dc.DCL_CXC > 0 OR dc.DCL_TDT_CODIGO IN ('PED','DPED'))
   AND TRIM(c.CLT_RIF) <> ''
   AND TRIM(c.CLT_RIF) NOT IN ('00000000','0000000-0','INDEFINIDO')
-ORDER BY dc.DCL_CLT_CODIGO, dc.DCL_FECHAHORA DESC;
+ORDER BY dc.DCL_CLT_CODIGO, dc.DCL_FECHA DESC;
 "@
 
     $rows = Run-MySQL $sql
@@ -800,17 +817,21 @@ ORDER BY dc.DCL_CLT_CODIGO, dc.DCL_FECHAHORA DESC;
     $dict = [ordered]@{}
     foreach ($row in $rows) {
         $key = "$($row.tipo.Trim())|$($row.numero.Trim())"
-        if (-not $dict.ContainsKey($key)) {
+        if (-not $dict.Contains($key)) {
             $dict[$key] = [PSCustomObject]@{
                 tipo           = $row.tipo.Trim()
                 numero         = $row.numero.Trim()
                 fecha          = $row.fecha.Trim()
+                recepcion      = $row.recepcion.Trim()
                 cliente_codigo = $row.cliente_codigo.Trim()
                 rif            = $row.rif.Trim()
                 email          = $row.email.Trim()
                 total_bs       = [double]($row.total_bs  -replace '[^0-9.]','')
                 total_usd      = [double]($row.total_usd -replace '[^0-9.]','')
                 estado         = $row.estado.Trim()
+                vendedor       = $row.vendedor.Trim()
+                dias_ven       = $(try { [int]$row.dias_ven } catch { 0 })
+                doc_origin     = $row.doc_origin.Trim()
                 items          = [System.Collections.Generic.List[object]]::new()
             }
         }
@@ -857,7 +878,7 @@ switch ($Modo) {
     "imagenes"    { Sync-Imagenes }
     "pedidos"     { Sync-PedidosWeb }
     "existencias" { Sync-Existencias }
-    "clientes"    { Sync-Clientes }
+    "clientes"    { Sync-Clientes; Sync-PedidosADN }
     "eliminados"  { Sync-ProductosEliminados }
     "pedidos-adn" { Sync-PedidosADN }
     "status"      { Get-Status }

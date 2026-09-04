@@ -769,3 +769,108 @@ ul.products.adn-productos-grid li.adn-producto-item {
         grid-template-columns: 1fr !important;
     }
 }
+
+/* ── Custom Price Slider ─────────────────────────────────────────────────── */
+#adn-price-slider {
+    margin: 10px 6px 14px;
+}
+#adn-price-slider .noUi-connect {
+    background: #7e3af2;
+}
+#adn-price-slider .noUi-handle {
+    width: 18px !important;
+    height: 18px !important;
+    border-radius: 50% !important;
+    top: -5px !important;
+    right: -9px !important;
+    box-shadow: 0 1px 4px rgba(0,0,0,.3) !important;
+    cursor: pointer;
+    background: #fff;
+    border: 2px solid #7e3af2 !important;
+}
+#adn-price-slider .noUi-handle::before,
+#adn-price-slider .noUi-handle::after {
+    display: none !important;
+}
+.adn-price-display {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    color: #444;
+    margin-top: 6px;
+    padding: 0 2px;
+    font-weight: 500;
+}
+
+/* ==========================================================
+   Brand Archive: sin sidebar, ancho completo
+   ========================================================== */
+
+.tax-brand .woocommerce-page .col-full,
+.tax-pwb-brand .woocommerce-page .col-full,
+.tax-brand .site-content,
+.tax-pwb-brand .site-content {
+    max-width: 100% !important;
+}
+
+/* Ocultar sidebar y BeRocket filters en páginas de marca */
+.tax-brand .col-1,
+.tax-brand #secondary,
+.tax-brand .widget-area,
+.tax-brand aside,
+.tax-brand .berocket_woocommerce_filter_shortcode_widget,
+.tax-brand .berocket_filter_widget,
+.tax-brand .brw_widget,
+.tax-brand .berocket_aapf_widget,
+.tax-brand input[type="checkbox"].berocket_aapf_widget-filter,
+.tax-pwb-brand .col-1,
+.tax-pwb-brand #secondary,
+.tax-pwb-brand .widget-area,
+.tax-pwb-brand aside,
+.tax-pwb-brand .berocket_woocommerce_filter_shortcode_widget,
+.tax-pwb-brand .berocket_filter_widget,
+.tax-pwb-brand .brw_widget,
+.tax-pwb-brand .berocket_aapf_widget,
+.tax-pwb-brand input[type="checkbox"].berocket_aapf_widget-filter {
+    display: none !important;
+}
+
+/* Área de contenido principal a ancho completo en páginas de marca */
+.tax-brand #primary,
+.tax-brand .col-2.col-full,
+.tax-brand main.site-main,
+.tax-brand .main-content,
+.tax-pwb-brand #primary,
+.tax-pwb-brand .col-2.col-full,
+.tax-pwb-brand main.site-main,
+.tax-pwb-brand .main-content {
+    width: 100% !important;
+    float: none !important;
+    margin: 0 !important;
+}
+
+/* ==========================================================
+   Imagen placeholder en productos sin imagen
+   (loop WooCommerce nativo y en mini cart / WP Menu Cart)
+   ========================================================== */
+
+.woocommerce-loop-product__link img[src=""],
+.woocommerce-loop-product__link img:not([src]),
+.product_image img[src=""],
+.product_image img:not([src]) {
+    content: url('/wp-content/plugins/woocommerce/assets/images/placeholder.png');
+}
+
+/* Imagen placeholder en el mini cart y WP Menu Cart slideout */
+.mini_cart_item img[src=""],
+.mini_cart_item img:not([src]),
+.woocommerce-mini-cart__item img[src=""],
+.woocommerce-mini-cart__item img:not([src]),
+.wpmenucart-contents img[src=""],
+.wpmenucart-contents img:not([src]),
+#wpmenucart .cart_list img[src=""],
+#wpmenucart .cart_list img:not([src]),
+.wpmenucart_items img[src=""],
+.wpmenucart_items img:not([src]) {
+    content: url('/wp-content/plugins/woocommerce/assets/images/placeholder.png');
+}
