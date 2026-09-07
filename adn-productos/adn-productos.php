@@ -2481,7 +2481,7 @@ class ADN_Productos_Plugin {
         @media(min-width:960px) {
             .neve-main > .single-post-container .nv-single-post-wrap.col,
             .neve-main > .container .col {
-                max-width: 860px !important;
+                max-width: 100% !important;
             }
         }
         /* Ocultar título duplicado del tema */
