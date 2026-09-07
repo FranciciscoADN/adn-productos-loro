@@ -83,6 +83,11 @@ class ADN_Productos_Plugin {
         // ── WP Menu Cart: inyectar items en el slideout ────────────────────────
         add_action( 'wp_footer', array( $this, 'wpmenucart_inject_items' ) );
 
+        // ── Checkout: limpiar código postal 000001 (inválido por defecto en VE) ──
+        add_filter( 'woocommerce_checkout_get_value',          array( $this, 'clear_invalid_postcode_checkout' ), 10, 2 );
+        add_filter( 'woocommerce_customer_get_billing_postcode',  array( $this, 'clear_invalid_postcode_value' ) );
+        add_filter( 'woocommerce_customer_get_shipping_postcode', array( $this, 'clear_invalid_postcode_value' ) );
+
         // ── Recetas ────────────────────────────────────────────────────────────
         add_action( 'init',             array( $this, 'register_receta_post_type' ) );
         add_action( 'add_meta_boxes',   array( $this, 'receta_meta_boxes' ) );
@@ -135,6 +140,17 @@ class ADN_Productos_Plugin {
     public function make_postcode_optional( $fields ) {
         $fields['postcode']['required'] = false;
         return $fields;
+    }
+
+    public function clear_invalid_postcode_value( $value ) {
+        return ( $value === '000001' ) ? '' : $value;
+    }
+
+    public function clear_invalid_postcode_checkout( $value, $input ) {
+        if ( in_array( $input, [ 'billing_postcode', 'shipping_postcode' ], true ) && $value === '000001' ) {
+            return '';
+        }
+        return $value;
     }
 
     public function require_login_for_checkout() {
