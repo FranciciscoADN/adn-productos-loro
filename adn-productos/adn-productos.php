@@ -2450,7 +2450,10 @@ class ADN_Productos_Plugin {
         $ingredientes = get_post_meta( $post_id, '_receta_ingredientes',  true );
         $preparacion  = get_post_meta( $post_id, '_receta_preparacion',   true );
         $youtube      = get_post_meta( $post_id, '_receta_youtube',       true );
-        $excerpt      = get_post_field( 'post_excerpt', $post_id );
+        $excerpt = get_post_field( 'post_excerpt', $post_id );
+        if ( ! $excerpt ) {
+            $excerpt = wp_trim_words( strip_shortcodes( get_post_field( 'post_content', $post_id ) ), 40, '...' );
+        }
 
         // Ingredientes: líneas que terminan en ":" son encabezados de grupo
         $lineas_ingr = $ingredientes
@@ -2491,7 +2494,7 @@ class ADN_Productos_Plugin {
         /* ── Wrapper ────────────────────────────────────────────── */
         .rfd-wrap {
             font-family: inherit; color: #222;
-            max-width: 860px; margin: 0 auto 3rem;
+            max-width: 100%; margin: 0 auto 3rem;
         }
 
         /* ── Título ─────────────────────────────────────────────── */
