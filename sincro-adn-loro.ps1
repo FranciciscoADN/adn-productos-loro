@@ -382,6 +382,7 @@ SELECT
     TRIM(c.CLT_RIF)                                                            AS rif,
     TRIM(c.CLT_ZONA)                                                           AS ciudad,
     TRIM(c.CLT_CODIGOPOSTAL)                                                   AS codigo_postal,
+    TRIM(COALESCE(c.CLT_PAIS,''))                                              AS pais,
     TRIM(c.CLT_PASSWORD)                                                       AS clave_adn
 FROM adn_clientes c
 WHERE c.CLT_ACTIVO = 1
@@ -409,6 +410,7 @@ ORDER BY c.CLT_CODIGO;
             rif           = $_.rif.Trim()
             ciudad        = $_.ciudad.Trim()
             codigo_postal = $_.codigo_postal.Trim()
+            pais          = $_.pais.Trim()
             clave_adn     = $_.clave_adn.Trim()
         }
     } | Where-Object { $_.codigo -ne "" }
