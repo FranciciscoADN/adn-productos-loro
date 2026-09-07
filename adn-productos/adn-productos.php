@@ -2529,6 +2529,8 @@ class ADN_Productos_Plugin {
             font-size: .97rem; color: #555; line-height: 1.7;
             margin: 0 0 1.6rem; max-width: 720px;
         }
+        .rfd-excerpt p { margin: 0 0 .8rem; }
+        .rfd-excerpt p:last-child { margin-bottom: 0; }
 
         /* ── Hero imagen / video ────────────────────────────────── */
         .rfd-hero {
@@ -2696,7 +2698,7 @@ class ADN_Productos_Plugin {
 
             <!-- Excerpt -->
             <?php if ( $excerpt ) : ?>
-            <p class="rfd-excerpt"><?php echo esc_html( $excerpt ); ?></p>
+            <div class="rfd-excerpt"><?php echo wp_kses_post( wpautop( $excerpt ) ); ?></div>
             <?php endif; ?>
 
             <!-- Hero imagen / video -->
@@ -3064,6 +3066,8 @@ class ADN_Productos_Plugin {
             font-size:.93rem; color:#555; line-height:1.65;
             margin:0 0 1rem; flex:1;
         }
+        .adn-receta-row-excerpt p { margin:0 0 .7rem; }
+        .adn-receta-row-excerpt p:last-child { margin-bottom:0; }
         .adn-receta-row-cats {
             display:flex; flex-wrap:wrap; gap:.45rem; margin-bottom:1rem;
         }
@@ -3194,7 +3198,7 @@ class ADN_Productos_Plugin {
                     <a href="<?php echo esc_url( $permalink ); ?>"><?php echo esc_html( $title ); ?></a>
                 </h3>
                 <?php if ( $excerpt ) : ?>
-                    <p class="adn-receta-row-excerpt"><?php echo esc_html( $excerpt ); ?></p>
+                    <div class="adn-receta-row-excerpt"><?php echo wp_kses_post( wpautop( $excerpt ) ); ?></div>
                 <?php endif; ?>
                 <?php if ( ! empty( $categorias ) ) : ?>
                 <div class="adn-receta-row-cats">
