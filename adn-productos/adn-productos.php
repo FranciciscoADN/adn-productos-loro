@@ -2452,7 +2452,7 @@ class ADN_Productos_Plugin {
         $youtube      = get_post_meta( $post_id, '_receta_youtube',       true );
         $excerpt = get_post_field( 'post_excerpt', $post_id );
         if ( ! $excerpt ) {
-            $excerpt = wp_trim_words( strip_shortcodes( get_post_field( 'post_content', $post_id ) ), 40, '...' );
+            $excerpt = wp_strip_all_tags( strip_shortcodes( get_post_field( 'post_content', $post_id ) ) );
         }
 
         // Ingredientes: líneas que terminan en ":" son encabezados de grupo
@@ -3063,8 +3063,6 @@ class ADN_Productos_Plugin {
         .adn-receta-row-excerpt {
             font-size:.93rem; color:#555; line-height:1.65;
             margin:0 0 1rem; flex:1;
-            display:-webkit-box; -webkit-line-clamp:4;
-            -webkit-box-orient:vertical; overflow:hidden;
         }
         .adn-receta-row-cats {
             display:flex; flex-wrap:wrap; gap:.45rem; margin-bottom:1rem;
@@ -3148,7 +3146,10 @@ class ADN_Productos_Plugin {
             $post_id    = get_the_ID();
             $permalink  = get_permalink();
             $title      = get_the_title();
-            $excerpt    = get_the_excerpt();
+            $excerpt = get_post_field( 'post_excerpt', $post_id );
+            if ( ! $excerpt ) {
+                $excerpt = wp_strip_all_tags( strip_shortcodes( get_post_field( 'post_content', $post_id ) ) );
+            }
             $tiempo     = get_post_meta( $post_id, '_receta_tiempo',     true );
             $porciones  = get_post_meta( $post_id, '_receta_porciones',  true );
             $dificultad = get_post_meta( $post_id, '_receta_dificultad', true );
