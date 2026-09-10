@@ -87,6 +87,8 @@ class ADN_Productos_Plugin {
         add_filter( 'woocommerce_checkout_get_value',          array( $this, 'clear_invalid_postcode_checkout' ), 10, 2 );
         add_filter( 'woocommerce_customer_get_billing_postcode',  array( $this, 'clear_invalid_postcode_value' ) );
         add_filter( 'woocommerce_customer_get_shipping_postcode', array( $this, 'clear_invalid_postcode_value' ) );
+        add_filter( 'woocommerce_customer_get_billing_country',  array( $this, 'default_country_ve' ) );
+        add_filter( 'woocommerce_customer_get_shipping_country', array( $this, 'default_country_ve' ) );
 
         // ── Recetas ────────────────────────────────────────────────────────────
         add_action( 'init',             array( $this, 'register_receta_post_type' ) );
@@ -152,6 +154,10 @@ class ADN_Productos_Plugin {
 
     public function clear_invalid_postcode_value( $value ) {
         return ( $value === '000001' ) ? '' : $value;
+    }
+
+    public function default_country_ve( $value ) {
+        return empty( $value ) ? 'VE' : $value;
     }
 
     public function clear_invalid_postcode_checkout( $value, $input ) {

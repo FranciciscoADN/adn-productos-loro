@@ -28,7 +28,7 @@ $mysql_pass = "SyncLoro25"           # contraseña MySQL del ADN
 $mysql_db   = "adn"                            # nombre de la base de datos ADN
 
 # WordPress – Distribuidora El Loro
-$WP_URL      = "http://wordpress-fywhhaufr2a037pljdg17lmb.152.53.55.6.sslip.io"
+$WP_URL      = "https://distribuidoraellorovalera.com"
 $ADN_KEY     = "CLAVE_SECRETA_LORO"     # misma clave guardada con /set-key
 $FOTOS_DIR   = "C:\ADN Software\FOTOS\SINCRONIZADAS"         # carpeta donde ADN guarda las fotos
 
