@@ -1457,7 +1457,8 @@ class ADN_Productos_Plugin {
             $stock  = (int)   ( $item['stock']                  ?? 0 );
             $brand  = sanitize_text_field( $item['brand']       ?? '' );
             $cat    = sanitize_text_field( $item['category']    ?? '' );
-            $desc   = wp_kses_post( $item['description']        ?? '' );
+            $desc       = wp_kses_post( $item['description']        ?? '' );
+            $short_desc = wp_kses_post( $item['short_description']  ?? '' );
             $status = in_array( $item['status'] ?? 'publish', [ 'publish', 'draft' ], true )
                       ? $item['status'] : 'publish';
 
@@ -1501,6 +1502,9 @@ class ADN_Productos_Plugin {
             }
             if ( ! empty( $desc ) ) {
                 $product->set_description( $desc );
+            }
+            if ( ! empty( $short_desc ) ) {
+                $product->set_short_description( $short_desc );
             }
             $product->set_manage_stock( true );
             $product->set_stock_quantity( $stock );

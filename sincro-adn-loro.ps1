@@ -197,8 +197,8 @@ SELECT
               LIMIT 1), 0)                                                              AS stock,
     REPLACE(TRIM(COALESCE(c.CAT_DESCRIPCION, '')), '"', '')                             AS category,
     REPLACE(TRIM(COALESCE(m.MAR_DESCRIPCION, '')), '"', '')                             AS brand,
-    REPLACE(TRIM(IF(TRIM(COALESCE(p.PDT_DESCRI2,'')) <> '', p.PDT_DESCRI2,
-                    COALESCE(p.PDT_DESCRIPCION_CORTA,''))), '"', '')                    AS description
+    REPLACE(TRIM(COALESCE(p.PDT_DESCRIPCION_CORTA,'')), '"', '')                       AS short_description,
+    REPLACE(TRIM(COALESCE(p.PDT_DESCRI2,'')), '"', '')                                 AS description
 FROM adn_productos p
 LEFT JOIN adn_categorias c ON p.PDT_CAT_CODIGO = c.CAT_CODIGO
 LEFT JOIN adn_marcas m     ON p.PDT_MAR_CODIGO = m.MAR_CODIGO
@@ -217,14 +217,15 @@ ORDER BY p.PDT_CODIGO;
 
     $all_products = $rows | ForEach-Object {
         [PSCustomObject]@{
-            sku         = $_.sku.Trim()
-            name        = $_.name.Trim()
-            price       = [double]($_.price -replace '[^0-9.]','')
-            stock       = [int][double]($_.stock -replace ',','.')
-            category    = $_.category.Trim()
-            brand       = $_.brand.Trim()
-            description = $_.description.Trim()
-            status      = "publish"
+            sku               = $_.sku.Trim()
+            name              = $_.name.Trim()
+            price             = [double]($_.price -replace '[^0-9.]','')
+            stock             = [int][double]($_.stock -replace ',','.')
+            category          = $_.category.Trim()
+            brand             = $_.brand.Trim()
+            short_description = $_.short_description.Trim()
+            description       = $_.description.Trim()
+            status            = "publish"
         }
     } | Where-Object { $_.sku -ne "" }
 
