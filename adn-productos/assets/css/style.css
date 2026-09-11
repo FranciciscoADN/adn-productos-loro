@@ -24,6 +24,12 @@ ul.products.adn-productos-grid {
     margin: 0 !important;
 }
 
+@media (max-width: 768px) {	
+	.products.adn-productos-grid.columns-3{
+		grid-template-columns: repeat(2, 1fr) !important;
+	}
+}
+
 .woocommerce ul.products.adn-productos-grid li.product,
 ul.products.adn-productos-grid li.adn-producto-item {
     width: auto !important;
@@ -227,25 +233,89 @@ ul.products.adn-productos-grid li.adn-producto-item {
    Responsive
    ========================================================== */
 
-/* Tablet: máximo 2 columnas si hay 3+ configuradas */
+/* Tablet: 2 columnas */
 @media (max-width: 900px) {
-    .adn-productos-grid {
-        grid-template-columns: repeat(
-            min(var(--adn-columns, 3), 2),
-            1fr
-        ) !important;
+    .adn-productos-grid,
+    .woocommerce ul.products.adn-productos-grid,
+    ul.products.adn-productos-grid {
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 16px !important;
     }
 }
 
 /* Móvil: siempre 1 columna */
 @media (max-width: 540px) {
-    .adn-productos-grid {
+    .adn-productos-grid,
+    .woocommerce ul.products.adn-productos-grid,
+    ul.products.adn-productos-grid {
         grid-template-columns: 1fr !important;
-        gap: 16px;
+        gap: 16px !important;
     }
 
     .adn-producto-titulo {
         font-size: 13px;
+    }
+}
+
+/* ==========================================================
+   Filtros colapsables (Categorías / Marcas / Precio)
+   ========================================================== */
+
+.bapf_sfilter .bapf_head,
+.adn-filter-toggle {
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+/* Chevron: arriba = expandido, abajo = colapsado */
+.bapf_sfilter .bapf_head::after,
+.adn-filter-toggle::after {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-right: 2px solid #64748b;
+    border-bottom: 2px solid #64748b;
+    transform: rotate(-135deg);
+    transition: transform 0.2s ease;
+    flex-shrink: 0;
+    margin-top: -4px;
+}
+
+.bapf_sfilter.adn-collapsed .bapf_head::after,
+.adn-filter-section.adn-collapsed .adn-filter-toggle::after {
+    transform: rotate(45deg);
+    margin-top: 0;
+}
+
+.bapf_sfilter.adn-collapsed .bapf_body,
+.adn-filter-section.adn-collapsed .adn-filter-body {
+    display: none !important;
+}
+
+/* ==========================================================
+   Responsive — apilar sidebar sobre productos (Elementor)
+   ========================================================== */
+
+@media (max-width: 768px) {
+    /* El contenedor flex de Elementor que tiene sidebar + productos */
+    .e-con:has(> .e-con .adn-productos-wrapper):has(> .e-con .bapf_sfilter),
+    .e-con:has(> .e-con .adn-productos-wrapper):has(> .e-con .adn-marcas-filter-list),
+    .e-con:has(> .e-con .adn-productos-wrapper):has(> .e-con .berocket_aapf_widget),
+    .elementor-container:has(.adn-productos-wrapper):has(.bapf_sfilter) {
+        flex-direction: column !important;
+    }
+
+    /* Sidebar a ancho completo en móvil */
+    .e-con:has(.bapf_sfilter),
+    .e-con:has(.adn-marcas-filter-list),
+    .e-con:has(.berocket_aapf_widget) {
+        width: 100% !important;
+        max-width: 100% !important;
+        flex: 0 0 100% !important;
     }
 }
 

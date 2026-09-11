@@ -666,6 +666,43 @@
         function () { scheduleRefresh(); }
     );
 
+    // ── Filtros colapsables (Categorías / Marcas / Precio) ────────────────────
+    function adnInitCollapsibleFilters() {
+        // BeRocket: click en el header togglea el body del filtro
+        $(document).on('click', '.bapf_sfilter .bapf_head', function (e) {
+            if ($(e.target).is('input, a, button, select')) { return; }
+            $(this).closest('.bapf_sfilter').toggleClass('adn-collapsed');
+        });
+
+        // Filtro de marcas propio
+        $(document).on('click', '.adn-filter-toggle', function () {
+            var $sec = $(this).closest('.adn-filter-section');
+            $sec.toggleClass('adn-collapsed');
+            $(this).attr('aria-expanded', $sec.hasClass('adn-collapsed') ? 'false' : 'true');
+        });
+        // Accesibilidad: Enter/Espacio en el toggle
+        $(document).on('keydown', '.adn-filter-toggle', function (e) {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                $(this).trigger('click');
+            }
+        });
+
+        // En móvil iniciar colapsados para no empujar los productos hacia abajo
+        if (window.innerWidth <= 768) {
+            $('.bapf_sfilter, .adn-filter-section').addClass('adn-collapsed');
+            $('.adn-filter-toggle').attr('aria-expanded', 'false');
+        }
+    }
+    $(document).ready(adnInitCollapsibleFilters);
+
+    // Si BeRocket re-renderiza sus filtros por AJAX, re-colapsar en móvil
+    $(document).on('berocket_ajax_products_loaded berocket_ajax_products_finished', function () {
+        if (window.innerWidth <= 768) {
+            $('.bapf_sfilter:not(.adn-collapsed)').addClass('adn-collapsed');
+        }
+    });
+
     // ── Custom Price Slider ────────────────────────────────────────────────────
     // Reemplaza el slider de precio de BeRocket con uno propio para que la lectura
     // de min_price / max_price sea 100% confiable, sin depender de eventos de BeRocket.

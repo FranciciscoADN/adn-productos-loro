@@ -257,26 +257,32 @@ class ADN_Productos_Plugin {
         ) );
         if ( empty( $terms ) || is_wp_error( $terms ) ) { return '<!-- adn_filtro_marcas: sin términos en ' . esc_attr( $brand_tax ) . ' -->'; }
 
+        $titulo = ! empty( $atts['titulo'] ) ? $atts['titulo'] : 'Marcas';
+
         ob_start();
-        if ( ! empty( $atts['titulo'] ) ) {
-            echo '<h4 class="adn-marcas-titulo">' . esc_html( $atts['titulo'] ) . '</h4>';
-        }
         ?>
-        <ul class="adn-marcas-filter-list" data-brand-tax="<?php echo esc_attr( $brand_tax ); ?>">
-            <?php foreach ( $terms as $term ) : ?>
-            <li class="adn-marca-item">
-                <label>
-                    <input type="checkbox"
-                           class="adn-marca-check"
-                           data-taxonomy="<?php echo esc_attr( $brand_tax ); ?>"
-                           data-slug="<?php echo esc_attr( $term->slug ); ?>"
-                           value="<?php echo esc_attr( $term->slug ); ?>">
-                    <span class="adn-marca-nombre"><?php echo esc_html( $term->name ); ?></span>
-                    <span class="adn-marca-count">(<?php echo (int) $term->count; ?>)</span>
-                </label>
-            </li>
-            <?php endforeach; ?>
-        </ul>
+        <div class="adn-filter-section adn-marcas-section">
+            <h4 class="adn-marcas-titulo adn-filter-toggle" role="button" tabindex="0" aria-expanded="true">
+                <span><?php echo esc_html( $titulo ); ?></span>
+            </h4>
+            <div class="adn-filter-body">
+                <ul class="adn-marcas-filter-list" data-brand-tax="<?php echo esc_attr( $brand_tax ); ?>">
+                    <?php foreach ( $terms as $term ) : ?>
+                    <li class="adn-marca-item">
+                        <label>
+                            <input type="checkbox"
+                                   class="adn-marca-check"
+                                   data-taxonomy="<?php echo esc_attr( $brand_tax ); ?>"
+                                   data-slug="<?php echo esc_attr( $term->slug ); ?>"
+                                   value="<?php echo esc_attr( $term->slug ); ?>">
+                            <span class="adn-marca-nombre"><?php echo esc_html( $term->name ); ?></span>
+                            <span class="adn-marca-count">(<?php echo (int) $term->count; ?>)</span>
+                        </label>
+                    </li>
+                    <?php endforeach; ?>
+                </ul>
+            </div>
+        </div>
         <?php
         return ob_get_clean();
     }
@@ -1457,8 +1463,7 @@ class ADN_Productos_Plugin {
             $stock  = (int)   ( $item['stock']                  ?? 0 );
             $brand  = sanitize_text_field( $item['brand']       ?? '' );
             $cat    = sanitize_text_field( $item['category']    ?? '' );
-            $desc       = wp_kses_post( $item['description']        ?? '' );
-            $short_desc = wp_kses_post( $item['short_description']  ?? '' );
+            $desc = wp_kses_post( $item['description'] ?? '' );
             $status = in_array( $item['status'] ?? 'publish', [ 'publish', 'draft' ], true )
                       ? $item['status'] : 'publish';
 
@@ -1502,9 +1507,7 @@ class ADN_Productos_Plugin {
             }
             if ( ! empty( $desc ) ) {
                 $product->set_description( $desc );
-            }
-            if ( ! empty( $short_desc ) ) {
-                $product->set_short_description( $short_desc );
+                $product->set_short_description( $desc );
             }
             $product->set_manage_stock( true );
             $product->set_stock_quantity( $stock );
