@@ -24,6 +24,22 @@ ul.products.adn-productos-grid {
     margin: 0 !important;
 }
 
+.adn-receta-row-title{
+    font-family: "Poppins";
+}
+.rfd-title{
+    font-family: "Poppins";
+}
+.rfd-meta{
+    font-family: "Poppins";
+}
+.rfd-stats{
+    font-family: "Poppins";
+}
+.rfd-body{
+    font-family: "Poppins";
+}
+
 @media (max-width: 768px) {	
 	.products.adn-productos-grid.columns-3{
 		grid-template-columns: repeat(2, 1fr) !important;
