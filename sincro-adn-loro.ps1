@@ -381,8 +381,12 @@ SELECT
     TRIM(c.CLT_RIF)                                                            AS rif,
     TRIM(c.CLT_ZONA)                                                           AS ciudad,
     TRIM(c.CLT_CODIGOPOSTAL)                                                   AS codigo_postal,
+    TRIM(COALESCE(edo.EDO_NOMBRE, ''))                                         AS estado,
+    TRIM(COALESCE(mpo.MPO_NOMBRE, ''))                                         AS municipio,
     TRIM(c.CLT_PASSWORD)                                                       AS clave_adn
 FROM adn_clientes c
+LEFT JOIN adn_estados     edo ON edo.EDO_CODIGO = c.CLT_EDO_CODIGO
+LEFT JOIN adn_municipios  mpo ON mpo.MPO_CODIGO = c.CLT_MPO_CODIGO
 WHERE c.CLT_ACTIVO = 1
   AND c.CLT_SITUACION = 'ACT'
   AND TRIM(c.CLT_CODIGO) <> ''
@@ -408,6 +412,8 @@ ORDER BY c.CLT_CODIGO;
             rif           = $_.rif.Trim()
             ciudad        = $_.ciudad.Trim()
             codigo_postal = $_.codigo_postal.Trim()
+            estado        = $_.estado.Trim()
+            municipio     = $_.municipio.Trim()
             clave_adn     = $_.clave_adn.Trim()
         }
     } | Where-Object { $_.codigo -ne "" }
