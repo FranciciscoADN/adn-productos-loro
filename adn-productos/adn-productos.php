@@ -1934,12 +1934,43 @@ class ADN_Productos_Plugin {
             $rif          = sanitize_text_field( trim( $item['rif']           ?? '' ) );
             $ciudad       = sanitize_text_field( trim( $item['ciudad']        ?? '' ) );
             $codigo_postal= sanitize_text_field( trim( $item['codigo_postal'] ?? '' ) );
-            $pais_raw     = strtoupper( sanitize_text_field( trim( $item['pais'] ?? '' ) ) );
+            $pais_raw     = strtoupper( sanitize_text_field( trim( $item['pais']      ?? '' ) ) );
+            $estado_raw   = strtoupper( remove_accents( sanitize_text_field( trim( $item['estado']    ?? '' ) ) ) );
+            $municipio    = sanitize_text_field( trim( $item['municipio'] ?? '' ) );
             $clave_adn    = trim( $item['clave_adn'] ?? '' );
 
             // Mapear nombre de país a código ISO 3166-1 alpha-2
             $country_map  = [ 'VENEZUELA' => 'VE', 'VEN' => 'VE', 'VE' => 'VE' ];
             $billing_country = $country_map[ $pais_raw ] ?? ( strlen( $pais_raw ) === 2 ? $pais_raw : 'VE' );
+
+            // Mapear nombre de estado venezolano → código ISO WooCommerce (VE-X)
+            $state_map = [
+                'DISTRITO CAPITAL' => 'VE-A', 'CAPITAL'      => 'VE-A',
+                'ANZOATEGUI'       => 'VE-B',
+                'APURE'            => 'VE-C',
+                'ARAGUA'           => 'VE-D',
+                'BARINAS'          => 'VE-E',
+                'BOLIVAR'          => 'VE-F',
+                'CARABOBO'         => 'VE-G',
+                'COJEDES'          => 'VE-H',
+                'DELTA AMACURO'    => 'VE-I',
+                'FALCON'           => 'VE-J',
+                'GUARICO'          => 'VE-K',
+                'LARA'             => 'VE-L',
+                'MERIDA'           => 'VE-M',
+                'MIRANDA'          => 'VE-N',
+                'MONAGAS'          => 'VE-O',
+                'NUEVA ESPARTA'    => 'VE-P',
+                'PORTUGUESA'       => 'VE-R',
+                'SUCRE'            => 'VE-S',
+                'TRUJILLO'         => 'VE-T',
+                'YARACUY'          => 'VE-U',
+                'VARGAS'           => 'VE-V', 'LA GUAIRA'    => 'VE-V',
+                'ZULIA'            => 'VE-W',
+                'TACHIRA'          => 'VE-X',
+                'AMAZONAS'         => 'VE-Z',
+            ];
+            $billing_state = $state_map[ $estado_raw ] ?? '';
             // Nombre/apellido compuestos vienen separados desde ADN
             $first_name_adn = sanitize_text_field( trim( $item['primer_nombre'] ?? '' ) );
             $last_name_adn  = sanitize_text_field( trim( $item['apellido']      ?? '' ) );
@@ -2052,7 +2083,7 @@ class ADN_Productos_Plugin {
             update_user_meta( $user_id, 'billing_city',             $ciudad );
             update_user_meta( $user_id, 'billing_postcode',         $codigo_postal !== '000001' ? $codigo_postal : '' );
             update_user_meta( $user_id, 'billing_country',          $billing_country );
-            update_user_meta( $user_id, 'billing_state',            '' );
+            update_user_meta( $user_id, 'billing_state',            $billing_state );
             update_user_meta( $user_id, 'shipping_first_name',      ! empty( $rif_upper ) ? $rif_upper : $first_name );
             update_user_meta( $user_id, 'shipping_last_name',       $nombre );
             update_user_meta( $user_id, 'shipping_company',         $nombre );
@@ -2060,7 +2091,7 @@ class ADN_Productos_Plugin {
             update_user_meta( $user_id, 'shipping_city',            $ciudad );
             update_user_meta( $user_id, 'shipping_postcode',        $codigo_postal !== '000001' ? $codigo_postal : '' );
             update_user_meta( $user_id, 'shipping_country',         $billing_country );
-            update_user_meta( $user_id, 'shipping_state',           '' );
+            update_user_meta( $user_id, 'shipping_state',           $billing_state );
 
             $this->adn_log( 'customers', ( $existing_id ? 'UPDATE' : 'CREATE' ) . ' ' . $codigo . ' ' . $nombre );
         }
