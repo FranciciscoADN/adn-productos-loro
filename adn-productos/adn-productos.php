@@ -77,6 +77,9 @@ class ADN_Productos_Plugin {
         // Código postal opcional (clientes ADN tienen 0000001 por defecto, no válido)
         add_filter( 'woocommerce_default_address_fields', array( $this, 'make_postcode_optional' ) );
 
+        // Checkout: ocultar Estado/Municipio y Código Postal
+        add_filter( 'woocommerce_checkout_fields', array( $this, 'remove_state_postcode_checkout' ) );
+
         // ── Páginas de archivo de marca: reemplazar loop WC con grid ADN ──────
         add_action( 'wp', array( $this, 'override_brand_archive_loop' ) );
 
@@ -149,6 +152,14 @@ class ADN_Productos_Plugin {
 
     public function make_postcode_optional( $fields ) {
         $fields['postcode']['required'] = false;
+        return $fields;
+    }
+
+    public function remove_state_postcode_checkout( $fields ) {
+        unset( $fields['billing']['billing_state'] );
+        unset( $fields['billing']['billing_postcode'] );
+        unset( $fields['shipping']['shipping_state'] );
+        unset( $fields['shipping']['shipping_postcode'] );
         return $fields;
     }
 
