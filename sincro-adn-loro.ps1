@@ -381,8 +381,8 @@ SELECT
     TRIM(c.CLT_RIF)                                                            AS rif,
     TRIM(c.CLT_ZONA)                                                           AS ciudad,
     TRIM(c.CLT_CODIGOPOSTAL)                                                   AS codigo_postal,
-    TRIM(COALESCE(edo.EDO_NOMBRE, ''))                                         AS estado,
-    TRIM(COALESCE(mpo.MPO_NOMBRE, ''))                                         AS municipio,
+    TRIM(COALESCE(edo.EDO_DESCRI, ''))                                         AS estado,
+    TRIM(COALESCE(mpo.MPO_DESCRI, ''))                                         AS municipio,
     TRIM(c.CLT_PASSWORD)                                                       AS clave_adn
 FROM adn_clientes c
 LEFT JOIN adn_estados     edo ON edo.EDO_CODIGO = c.CLT_EDO_CODIGO
