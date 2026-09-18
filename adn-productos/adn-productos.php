@@ -95,6 +95,7 @@ class ADN_Productos_Plugin {
 
         // ── Recetas ────────────────────────────────────────────────────────────
         add_action( 'init',             array( $this, 'register_receta_post_type' ) );
+        add_action( 'init',             array( $this, 'register_receta_roles' ) );
         add_action( 'add_meta_boxes',   array( $this, 'receta_meta_boxes' ) );
         add_action( 'save_post_receta', array( $this, 'receta_save_meta' ), 10, 2 );
         add_shortcode( 'adn_recetas',   array( $this, 'render_recetas_shortcode' ) );
@@ -2968,13 +2969,15 @@ class ADN_Productos_Plugin {
                 'not_found_in_trash' => 'No hay recetas en la papelera',
                 'menu_name'          => 'Recetas',
             ],
-            'public'       => true,
-            'show_in_menu' => true,
-            'menu_icon'    => 'dashicons-food',
-            'supports'     => [ 'title', 'editor', 'thumbnail', 'excerpt' ],
-            'has_archive'  => false,
-            'rewrite'      => [ 'slug' => 'receta' ],
-            'show_in_rest' => true,
+            'public'           => true,
+            'show_in_menu'     => true,
+            'menu_icon'        => 'dashicons-food',
+            'supports'         => [ 'title', 'editor', 'thumbnail', 'excerpt' ],
+            'has_archive'      => false,
+            'rewrite'          => [ 'slug' => 'receta' ],
+            'show_in_rest'     => true,
+            'capability_type'  => [ 'receta', 'recetas' ],
+            'map_meta_cap'     => true,
         ] );
 
         register_taxonomy( 'categoria_receta', 'receta', [
@@ -2989,6 +2992,50 @@ class ADN_Productos_Plugin {
             'show_in_rest' => true,
             'rewrite'      => [ 'slug' => 'categoria-receta' ],
         ] );
+    }
+
+    public function register_receta_roles(): void {
+        if ( get_option( 'adn_receta_roles_ver' ) === '2' ) {
+            return;
+        }
+
+        $caps_receta = [
+            'edit_recetas',
+            'edit_others_recetas',
+            'edit_published_recetas',
+            'edit_private_recetas',
+            'publish_recetas',
+            'read_private_recetas',
+            'delete_recetas',
+            'delete_others_recetas',
+            'delete_published_recetas',
+            'delete_private_recetas',
+            'create_recetas',
+        ];
+
+        // Asegurarse que el administrador tenga todas las capacidades del CPT
+        $admin = get_role( 'administrator' );
+        if ( $admin ) {
+            foreach ( $caps_receta as $cap ) {
+                $admin->add_cap( $cap );
+            }
+        }
+
+        // Crear o actualizar el rol editor_recetas
+        remove_role( 'editor_recetas' );
+        add_role( 'editor_recetas', 'Editor de Recetas', [
+            'read'                      => true,
+            'upload_files'              => true,
+            'manage_categories'         => true,
+            'edit_recetas'              => true,
+            'edit_published_recetas'    => true,
+            'publish_recetas'           => true,
+            'delete_recetas'            => true,
+            'delete_published_recetas'  => true,
+            'create_recetas'            => true,
+        ] );
+
+        update_option( 'adn_receta_roles_ver', '2' );
     }
 
     public function receta_meta_boxes(): void {
