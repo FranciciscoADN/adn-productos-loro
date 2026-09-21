@@ -18,10 +18,119 @@ class ADN_Recetas_Plugin {
     public function __construct() {
         add_action( 'init',             [ $this, 'register_post_type' ] );
         add_action( 'init',             [ $this, 'setup_roles' ] );
+        add_action( 'init',             [ $this, 'account_endpoint' ] );
         add_action( 'add_meta_boxes',   [ $this, 'meta_boxes' ] );
         add_action( 'save_post_receta', [ $this, 'save_meta' ], 10, 2 );
         add_shortcode( 'adn_recetas',   [ $this, 'shortcode_lista' ] );
         add_filter( 'the_content',      [ $this, 'single_content' ] );
+        add_filter( 'woocommerce_account_menu_items',              [ $this, 'account_menu_item' ] );
+        add_action( 'woocommerce_account_mis-recetas_endpoint',    [ $this, 'account_endpoint_content' ] );
+    }
+
+    // ─── Mi Cuenta: Mis Recetas ──────────────────────────────────────────────
+
+    public function account_endpoint(): void {
+        add_rewrite_endpoint( 'mis-recetas', EP_ROOT | EP_PAGES );
+        if ( get_option( 'adn_recetas_ep_flush' ) !== '1' ) {
+            update_option( 'adn_recetas_ep_flush', '1' );
+            flush_rewrite_rules( false );
+        }
+    }
+
+    public function account_menu_item( array $items ): array {
+        if ( ! current_user_can( 'edit_recetas' ) ) {
+            return $items;
+        }
+        $logout = false;
+        if ( isset( $items['customer-logout'] ) ) {
+            $logout = $items['customer-logout'];
+            unset( $items['customer-logout'] );
+        }
+        $items['mis-recetas'] = 'Mis Recetas';
+        if ( $logout !== false ) {
+            $items['customer-logout'] = $logout;
+        }
+        return $items;
+    }
+
+    public function account_endpoint_content(): void {
+        if ( ! current_user_can( 'edit_recetas' ) ) {
+            echo '<p>No tienes permisos para ver esta sección.</p>';
+            return;
+        }
+
+        $user_id = get_current_user_id();
+        $query   = new WP_Query( [
+            'post_type'      => 'receta',
+            'author'         => $user_id,
+            'post_status'    => [ 'publish', 'draft', 'pending' ],
+            'posts_per_page' => -1,
+            'orderby'        => 'date',
+            'order'          => 'DESC',
+        ] );
+        $new_url = admin_url( 'post-new.php?post_type=receta' );
+        ?>
+        <style>
+        .adn-mr-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem; flex-wrap:wrap; gap:.8rem; }
+        .adn-mr-btn { display:inline-block; padding:9px 22px; border-radius:6px; background:#e84248; color:#fff !important;
+            font-weight:700; font-size:.9rem; text-decoration:none !important; transition:opacity .2s; }
+        .adn-mr-btn:hover { opacity:.85; }
+        .adn-mr-table { width:100%; border-collapse:collapse; font-size:.93rem; }
+        .adn-mr-table th { text-align:left; padding:10px 12px; background:#f5f5f5;
+            border-bottom:2px solid #ddd; font-weight:700; color:#333; }
+        .adn-mr-table td { padding:10px 12px; border-bottom:1px solid #eee; vertical-align:middle; }
+        .adn-mr-table tr:hover td { background:#fafafa; }
+        .adn-mr-status { display:inline-block; padding:2px 10px; border-radius:20px; font-size:.78rem; font-weight:600; }
+        .adn-mr-status--pub  { background:#e6f7ee; color:#1a7f47; }
+        .adn-mr-status--draft { background:#f0f0f0; color:#777; }
+        .adn-mr-actions a { font-size:.85rem; color:#1976d2; text-decoration:none; margin-right:10px; }
+        .adn-mr-actions a:hover { color:#e84248; }
+        .adn-mr-empty { color:#888; font-style:italic; padding:1.5rem 0; }
+        </style>
+
+        <div class="adn-mr-header">
+            <h3 style="margin:0">Mis Recetas</h3>
+            <a href="<?php echo esc_url( $new_url ); ?>" class="adn-mr-btn">+ Nueva Receta</a>
+        </div>
+
+        <?php if ( $query->have_posts() ) : ?>
+        <table class="adn-mr-table">
+            <thead>
+                <tr>
+                    <th>Título</th>
+                    <th>Estado</th>
+                    <th>Fecha</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+            <?php while ( $query->have_posts() ) :
+                $query->the_post();
+                $pid    = get_the_ID();
+                $status = get_post_status();
+                $label  = $status === 'publish' ? 'Publicada' : 'Borrador';
+                $cls    = $status === 'publish' ? 'adn-mr-status--pub' : 'adn-mr-status--draft';
+            ?>
+            <tr>
+                <td><strong><?php the_title(); ?></strong></td>
+                <td><span class="adn-mr-status <?php echo esc_attr( $cls ); ?>"><?php echo esc_html( $label ); ?></span></td>
+                <td><?php echo get_the_date( 'd/m/Y' ); ?></td>
+                <td class="adn-mr-actions">
+                    <a href="<?php echo esc_url( get_edit_post_link( $pid ) ); ?>">Editar</a>
+                    <?php if ( $status === 'publish' ) : ?>
+                    <a href="<?php echo esc_url( get_permalink( $pid ) ); ?>" target="_blank">Ver</a>
+                    <?php endif; ?>
+                </td>
+            </tr>
+            <?php endwhile; wp_reset_postdata(); ?>
+            </tbody>
+        </table>
+        <?php else : ?>
+        <p class="adn-mr-empty">
+            Aún no has creado ninguna receta.
+            <a href="<?php echo esc_url( $new_url ); ?>">Crea tu primera receta</a>.
+        </p>
+        <?php endif;
     }
 
     // ─── CPT + Taxonomía ─────────────────────────────────────────────────────
