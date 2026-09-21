@@ -25,6 +25,12 @@ class ADN_Recetas_Plugin {
         add_filter( 'the_content',      [ $this, 'single_content' ] );
         add_filter( 'woocommerce_account_menu_items',              [ $this, 'account_menu_item' ] );
         add_action( 'woocommerce_account_mis-recetas_endpoint',    [ $this, 'account_endpoint_content' ] );
+
+        // Permitir acceso a wp-admin para el rol editor_recetas
+        add_filter( 'woocommerce_prevent_admin_access', [ $this, 'allow_receta_editor_admin' ] );
+
+        // Limpiar menú de wp-admin para rol editor_recetas
+        add_action( 'admin_menu', [ $this, 'restrict_admin_menu' ], 999 );
     }
 
     // ─── Mi Cuenta: Mis Recetas ──────────────────────────────────────────────
@@ -131,6 +137,34 @@ class ADN_Recetas_Plugin {
             <a href="<?php echo esc_url( $new_url ); ?>">Crea tu primera receta</a>.
         </p>
         <?php endif;
+    }
+
+    // ─── Acceso wp-admin para editor_recetas ─────────────────────────────────
+
+    public function allow_receta_editor_admin( bool $prevent ): bool {
+        if ( current_user_can( 'edit_recetas' ) ) {
+            return false;
+        }
+        return $prevent;
+    }
+
+    public function restrict_admin_menu(): void {
+        if ( ! current_user_can( 'edit_recetas' ) || current_user_can( 'manage_options' ) ) {
+            return;
+        }
+        global $menu, $submenu;
+
+        // Menús permitidos: Dashboard (index.php), Recetas (edit.php?post_type=receta), Media (upload.php)
+        $allowed = [ 'index.php', 'upload.php', 'edit.php?post_type=receta' ];
+
+        foreach ( $menu as $key => $item ) {
+            if ( ! empty( $item[2] ) && ! in_array( $item[2], $allowed, true ) ) {
+                remove_menu_page( $item[2] );
+            }
+        }
+
+        // Ocultar el enlace "Visit Site" y barra superior innecesaria
+        remove_action( 'admin_bar_menu', 'wp_admin_bar_site_menu', 30 );
     }
 
     // ─── CPT + Taxonomía ─────────────────────────────────────────────────────
