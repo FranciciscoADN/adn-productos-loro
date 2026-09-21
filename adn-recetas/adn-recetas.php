@@ -26,6 +26,10 @@ class ADN_Recetas_Plugin {
         add_filter( 'woocommerce_account_menu_items',              [ $this, 'account_menu_item' ] );
         add_action( 'woocommerce_account_mis-recetas_endpoint',    [ $this, 'account_endpoint_content' ] );
 
+        // Frontend CRUD
+        add_action( 'init',                          [ $this, 'handle_receta_save' ] );
+        add_action( 'wp_ajax_adn_delete_receta',     [ $this, 'ajax_delete_receta' ] );
+
         // Permitir acceso a wp-admin para el rol editor_recetas
         add_filter( 'woocommerce_prevent_admin_access', [ $this, 'allow_receta_editor_admin' ] );
 
@@ -64,9 +68,23 @@ class ADN_Recetas_Plugin {
             echo '<p>No tienes permisos para ver esta sección.</p>';
             return;
         }
+        $action = sanitize_key( $_GET['action'] ?? '' );
+        $id     = (int) ( $_GET['id'] ?? 0 );
 
-        $user_id = get_current_user_id();
-        $query   = new WP_Query( [
+        if ( $action === 'nueva' ) {
+            $this->render_receta_form( 0 );
+        } elseif ( $action === 'editar' && $id > 0 ) {
+            $this->render_receta_form( $id );
+        } else {
+            $this->render_receta_list();
+        }
+    }
+
+    private function render_receta_list(): void {
+        $user_id  = get_current_user_id();
+        $list_url = function_exists( 'wc_get_account_endpoint_url' ) ? wc_get_account_endpoint_url( 'mis-recetas' ) : '/mi-cuenta/mis-recetas/';
+        $new_url  = add_query_arg( 'action', 'nueva', $list_url );
+        $query    = new WP_Query( [
             'post_type'      => 'receta',
             'author'         => $user_id,
             'post_status'    => [ 'publish', 'draft', 'pending' ],
@@ -74,25 +92,35 @@ class ADN_Recetas_Plugin {
             'orderby'        => 'date',
             'order'          => 'DESC',
         ] );
-        $new_url = admin_url( 'post-new.php?post_type=receta' );
         ?>
         <style>
         .adn-mr-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem; flex-wrap:wrap; gap:.8rem; }
-        .adn-mr-btn { display:inline-block; padding:9px 22px; border-radius:6px; background:#e84248; color:#fff !important;
-            font-weight:700; font-size:.9rem; text-decoration:none !important; transition:opacity .2s; }
+        .adn-mr-btn { display:inline-block; padding:9px 22px; border-radius:6px; background:#e84248; color:#fff !important; font-weight:700; font-size:.9rem; text-decoration:none !important; transition:opacity .2s; cursor:pointer; border:none; }
         .adn-mr-btn:hover { opacity:.85; }
+        .adn-mr-btn--ghost { background:transparent; border:2px solid #e84248; color:#e84248 !important; }
+        .adn-mr-btn--ghost:hover { background:#e84248; color:#fff !important; }
         .adn-mr-table { width:100%; border-collapse:collapse; font-size:.93rem; }
-        .adn-mr-table th { text-align:left; padding:10px 12px; background:#f5f5f5;
-            border-bottom:2px solid #ddd; font-weight:700; color:#333; }
+        .adn-mr-table th { text-align:left; padding:10px 12px; background:#f5f5f5; border-bottom:2px solid #ddd; font-weight:700; color:#333; }
         .adn-mr-table td { padding:10px 12px; border-bottom:1px solid #eee; vertical-align:middle; }
         .adn-mr-table tr:hover td { background:#fafafa; }
         .adn-mr-status { display:inline-block; padding:2px 10px; border-radius:20px; font-size:.78rem; font-weight:600; }
-        .adn-mr-status--pub  { background:#e6f7ee; color:#1a7f47; }
+        .adn-mr-status--pub   { background:#e6f7ee; color:#1a7f47; }
         .adn-mr-status--draft { background:#f0f0f0; color:#777; }
-        .adn-mr-actions a { font-size:.85rem; color:#1976d2; text-decoration:none; margin-right:10px; }
-        .adn-mr-actions a:hover { color:#e84248; }
+        .adn-mr-actions { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; }
+        .adn-mr-actions a, .adn-mr-del { font-size:.85rem; text-decoration:none; padding:4px 12px; border-radius:4px; font-weight:600; cursor:pointer; border:none; background:none; }
+        .adn-mr-actions .adn-mr-edit { color:#fff; background:#1976d2; }
+        .adn-mr-actions .adn-mr-view { color:#555; background:#f0f0f0; }
+        .adn-mr-actions .adn-mr-del  { color:#e84248; background:#fdecea; }
+        .adn-mr-actions .adn-mr-edit:hover { background:#1256a0; }
+        .adn-mr-actions .adn-mr-del:hover  { background:#e84248; color:#fff; }
         .adn-mr-empty { color:#888; font-style:italic; padding:1.5rem 0; }
+        .adn-mr-notice { padding:10px 16px; border-radius:6px; margin-bottom:1.2rem; font-size:.92rem; }
+        .adn-mr-notice--ok  { background:#e6f7ee; color:#1a7f47; }
         </style>
+
+        <?php if ( isset( $_GET['saved'] ) ) : ?>
+        <div class="adn-mr-notice adn-mr-notice--ok">✓ Receta guardada correctamente.</div>
+        <?php endif; ?>
 
         <div class="adn-mr-header">
             <h3 style="margin:0">Mis Recetas</h3>
@@ -102,30 +130,33 @@ class ADN_Recetas_Plugin {
         <?php if ( $query->have_posts() ) : ?>
         <table class="adn-mr-table">
             <thead>
-                <tr>
-                    <th>Título</th>
-                    <th>Estado</th>
-                    <th>Fecha</th>
-                    <th>Acciones</th>
-                </tr>
+                <tr><th>Título</th><th>Estado</th><th>Fecha</th><th>Acciones</th></tr>
             </thead>
-            <tbody>
+            <tbody id="adn-mr-tbody">
             <?php while ( $query->have_posts() ) :
                 $query->the_post();
-                $pid    = get_the_ID();
-                $status = get_post_status();
-                $label  = $status === 'publish' ? 'Publicada' : 'Borrador';
-                $cls    = $status === 'publish' ? 'adn-mr-status--pub' : 'adn-mr-status--draft';
+                $pid     = get_the_ID();
+                $status  = get_post_status();
+                $label   = $status === 'publish' ? 'Publicada' : 'Borrador';
+                $cls     = $status === 'publish' ? 'adn-mr-status--pub' : 'adn-mr-status--draft';
+                $edit_url = add_query_arg( [ 'action' => 'editar', 'id' => $pid ], $list_url );
+                $del_nonce = wp_create_nonce( 'adn_delete_receta_' . $pid );
             ?>
-            <tr>
+            <tr id="adn-mr-row-<?php echo $pid; ?>">
                 <td><strong><?php the_title(); ?></strong></td>
                 <td><span class="adn-mr-status <?php echo esc_attr( $cls ); ?>"><?php echo esc_html( $label ); ?></span></td>
                 <td><?php echo get_the_date( 'd/m/Y' ); ?></td>
-                <td class="adn-mr-actions">
-                    <a href="<?php echo esc_url( get_edit_post_link( $pid ) ); ?>">Editar</a>
-                    <?php if ( $status === 'publish' ) : ?>
-                    <a href="<?php echo esc_url( get_permalink( $pid ) ); ?>" target="_blank">Ver</a>
-                    <?php endif; ?>
+                <td>
+                    <div class="adn-mr-actions">
+                        <a href="<?php echo esc_url( $edit_url ); ?>" class="adn-mr-edit">Editar</a>
+                        <?php if ( $status === 'publish' ) : ?>
+                        <a href="<?php echo esc_url( get_permalink( $pid ) ); ?>" target="_blank" class="adn-mr-view">Ver</a>
+                        <?php endif; ?>
+                        <button class="adn-mr-del"
+                                data-id="<?php echo $pid; ?>"
+                                data-nonce="<?php echo esc_attr( $del_nonce ); ?>"
+                                onclick="adnDeleteReceta(this)">Eliminar</button>
+                    </div>
                 </td>
             </tr>
             <?php endwhile; wp_reset_postdata(); ?>
@@ -136,7 +167,309 @@ class ADN_Recetas_Plugin {
             Aún no has creado ninguna receta.
             <a href="<?php echo esc_url( $new_url ); ?>">Crea tu primera receta</a>.
         </p>
-        <?php endif;
+        <?php endif; ?>
+        <script>
+        function adnDeleteReceta(btn) {
+            if ( ! confirm('¿Eliminar esta receta? Esta acción no se puede deshacer.') ) return;
+            var pid   = btn.dataset.id;
+            var nonce = btn.dataset.nonce;
+            btn.disabled = true;
+            btn.textContent = '...';
+            var fd = new FormData();
+            fd.append('action',  'adn_delete_receta');
+            fd.append('post_id', pid);
+            fd.append('nonce',   nonce);
+            fetch('<?php echo esc_js( admin_url('admin-ajax.php') ); ?>', { method:'POST', body:fd })
+                .then(r => r.json())
+                .then(function(data) {
+                    if ( data.success ) {
+                        var row = document.getElementById('adn-mr-row-' + pid);
+                        if (row) row.remove();
+                    } else {
+                        alert('Error al eliminar: ' + (data.data || ''));
+                        btn.disabled = false;
+                        btn.textContent = 'Eliminar';
+                    }
+                });
+        }
+        </script>
+        <?php
+    }
+
+    private function render_receta_form( int $post_id ): void {
+        $is_edit  = $post_id > 0;
+        $list_url = function_exists( 'wc_get_account_endpoint_url' ) ? wc_get_account_endpoint_url( 'mis-recetas' ) : '/mi-cuenta/mis-recetas/';
+
+        if ( $is_edit ) {
+            $post = get_post( $post_id );
+            if ( ! $post || $post->post_type !== 'receta' || (int) $post->post_author !== get_current_user_id() ) {
+                echo '<p>No tienes permisos para editar esta receta. <a href="' . esc_url( $list_url ) . '">Volver</a></p>';
+                return;
+            }
+        }
+
+        $title        = $is_edit ? get_the_title( $post_id ) : '';
+        $excerpt      = $is_edit ? get_post_field( 'post_excerpt', $post_id ) : '';
+        $tiempo       = $is_edit ? get_post_meta( $post_id, '_receta_tiempo',       true ) : '';
+        $porciones    = $is_edit ? get_post_meta( $post_id, '_receta_porciones',    true ) : '';
+        $dificultad   = $is_edit ? get_post_meta( $post_id, '_receta_dificultad',   true ) : '';
+        $youtube      = $is_edit ? get_post_meta( $post_id, '_receta_youtube',      true ) : '';
+        $ingredientes = $is_edit ? get_post_meta( $post_id, '_receta_ingredientes', true ) : '';
+        $preparacion  = $is_edit ? get_post_meta( $post_id, '_receta_preparacion',  true ) : '';
+        $thumb_id     = $is_edit ? get_post_thumbnail_id( $post_id ) : 0;
+        $thumb_url    = $thumb_id ? wp_get_attachment_image_url( $thumb_id, 'medium' ) : '';
+        $cat_ids      = $is_edit ? wp_get_post_terms( $post_id, 'categoria_receta', [ 'fields' => 'ids' ] ) : [];
+        $all_cats     = get_terms( [ 'taxonomy' => 'categoria_receta', 'hide_empty' => false ] );
+        $error        = sanitize_text_field( $_GET['error'] ?? '' );
+        ?>
+        <style>
+        .adn-rf-back { font-size:.88rem; color:#666; text-decoration:none; display:inline-flex; align-items:center; gap:5px; margin-bottom:1.2rem; }
+        .adn-rf-back:hover { color:#e84248; }
+        .adn-rf-title { font-size:1.4rem; font-weight:800; margin:0 0 1.5rem; color:#111; }
+        .adn-rf-notice--err { background:#fdecea; color:#c0392b; padding:10px 16px; border-radius:6px; margin-bottom:1rem; font-size:.92rem; }
+        .adn-rf-grid { display:grid; grid-template-columns:1fr 1fr; gap:1.2rem; }
+        @media(max-width:640px) { .adn-rf-grid { grid-template-columns:1fr; } }
+        .adn-rf-field { display:flex; flex-direction:column; gap:.4rem; }
+        .adn-rf-field--full { grid-column:1/-1; }
+        .adn-rf-field label { font-size:.85rem; font-weight:700; color:#333; }
+        .adn-rf-field label span { font-weight:400; color:#888; margin-left:4px; }
+        .adn-rf-input, .adn-rf-select, .adn-rf-textarea {
+            width:100%; padding:9px 12px; border:1.5px solid #ddd; border-radius:6px;
+            font-size:.93rem; color:#111; background:#fff; box-sizing:border-box;
+            transition:border-color .2s; font-family:inherit;
+        }
+        .adn-rf-input:focus, .adn-rf-select:focus, .adn-rf-textarea:focus { border-color:#1976d2; outline:none; }
+        .adn-rf-textarea { resize:vertical; }
+        .adn-rf-img-preview { width:100%; max-width:220px; border-radius:8px; margin-top:.4rem; display:block; }
+        .adn-rf-cats { display:flex; flex-wrap:wrap; gap:.5rem 1.2rem; margin-top:.2rem; }
+        .adn-rf-cats label { font-size:.88rem; font-weight:400; color:#444; display:flex; align-items:center; gap:.4rem; cursor:pointer; }
+        .adn-rf-sep { grid-column:1/-1; border:none; border-top:1.5px solid #eee; margin:.4rem 0; }
+        .adn-rf-section-label { grid-column:1/-1; font-size:.78rem; text-transform:uppercase; letter-spacing:.1em; color:#aaa; font-weight:700; margin-bottom:-.6rem; }
+        .adn-rf-actions { display:flex; gap:1rem; align-items:center; flex-wrap:wrap; margin-top:1rem; }
+        .adn-rf-submit { padding:11px 28px; border-radius:6px; background:#e84248; color:#fff; font-weight:700; font-size:.95rem; border:none; cursor:pointer; transition:opacity .2s; }
+        .adn-rf-submit:hover { opacity:.85; }
+        .adn-rf-cancel { font-size:.9rem; color:#888; text-decoration:none; }
+        .adn-rf-cancel:hover { color:#e84248; }
+        </style>
+
+        <a href="<?php echo esc_url( $list_url ); ?>" class="adn-rf-back">← Mis Recetas</a>
+        <h3 class="adn-rf-title"><?php echo $is_edit ? 'Editar Receta' : 'Nueva Receta'; ?></h3>
+
+        <?php if ( $error === 'titulo_vacio' ) : ?>
+        <div class="adn-rf-notice--err">El nombre de la receta es obligatorio.</div>
+        <?php endif; ?>
+
+        <form method="post" enctype="multipart/form-data">
+            <?php wp_nonce_field( 'adn_receta_frontend_save', 'adn_receta_frontend_nonce' ); ?>
+            <input type="hidden" name="receta_post_id" value="<?php echo $post_id; ?>">
+
+            <div class="adn-rf-grid">
+
+                <div class="adn-rf-field adn-rf-field--full">
+                    <label>Nombre de la receta <span>*</span></label>
+                    <input class="adn-rf-input" type="text" name="receta_titulo"
+                           value="<?php echo esc_attr( $title ); ?>" placeholder="Ej: Pabellón Criollo" required>
+                </div>
+
+                <div class="adn-rf-field adn-rf-field--full">
+                    <label>Descripción corta <span>(aparece como resumen)</span></label>
+                    <textarea class="adn-rf-textarea" name="receta_excerpt" rows="3"
+                              placeholder="Breve descripción de la receta..."><?php echo esc_textarea( $excerpt ); ?></textarea>
+                </div>
+
+                <hr class="adn-rf-sep">
+                <p class="adn-rf-section-label">Imagen y video</p>
+
+                <div class="adn-rf-field">
+                    <label>Imagen principal</label>
+                    <?php if ( $thumb_url ) : ?>
+                    <img src="<?php echo esc_url( $thumb_url ); ?>" class="adn-rf-img-preview" id="adn-rf-preview">
+                    <label style="font-weight:400;color:#e84248;cursor:pointer;font-size:.85rem;margin-top:.3rem">
+                        <input type="checkbox" name="receta_remove_imagen" value="1"
+                               onchange="document.getElementById('adn-rf-preview').style.opacity=this.checked?.3:1">
+                        Eliminar imagen actual
+                    </label>
+                    <?php endif; ?>
+                    <input class="adn-rf-input" type="file" name="receta_imagen" accept="image/*"
+                           style="padding:5px">
+                </div>
+
+                <div class="adn-rf-field">
+                    <label>Video de YouTube <span>(URL)</span></label>
+                    <input class="adn-rf-input" type="url" name="_receta_youtube"
+                           value="<?php echo esc_attr( $youtube ); ?>"
+                           placeholder="https://www.youtube.com/watch?v=XXXXX">
+                </div>
+
+                <hr class="adn-rf-sep">
+                <p class="adn-rf-section-label">Datos</p>
+
+                <div class="adn-rf-field">
+                    <label>Tiempo de preparación</label>
+                    <input class="adn-rf-input" type="text" name="_receta_tiempo"
+                           value="<?php echo esc_attr( $tiempo ); ?>" placeholder="Ej: 1:30 horas">
+                </div>
+
+                <div class="adn-rf-field">
+                    <label>Porciones</label>
+                    <input class="adn-rf-input" type="text" name="_receta_porciones"
+                           value="<?php echo esc_attr( $porciones ); ?>" placeholder="Ej: 4-6 personas">
+                </div>
+
+                <div class="adn-rf-field">
+                    <label>Dificultad</label>
+                    <select class="adn-rf-select" name="_receta_dificultad">
+                        <option value="">Seleccionar...</option>
+                        <?php foreach ( [ 'Alta', 'Media', 'Baja' ] as $d ) : ?>
+                        <option value="<?php echo esc_attr($d); ?>" <?php selected( $dificultad, $d ); ?>><?php echo esc_html($d); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <?php if ( ! empty( $all_cats ) && ! is_wp_error( $all_cats ) ) : ?>
+                <div class="adn-rf-field">
+                    <label>Categoría</label>
+                    <div class="adn-rf-cats">
+                        <?php foreach ( $all_cats as $cat ) : ?>
+                        <label>
+                            <input type="checkbox" name="receta_categorias[]"
+                                   value="<?php echo $cat->term_id; ?>"
+                                   <?php checked( in_array( $cat->term_id, $cat_ids, true ) ); ?>>
+                            <?php echo esc_html( $cat->name ); ?>
+                        </label>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+                <?php endif; ?>
+
+                <hr class="adn-rf-sep">
+                <p class="adn-rf-section-label">Contenido</p>
+
+                <div class="adn-rf-field adn-rf-field--full">
+                    <label>Ingredientes <span>(un ingrediente por línea; líneas que terminan en ":" son encabezados)</span></label>
+                    <textarea class="adn-rf-textarea" name="_receta_ingredientes" rows="8"
+                              placeholder="Ej:&#10;Para la carne:&#10;500g de carne mechada&#10;Sal al gusto"><?php echo esc_textarea( $ingredientes ); ?></textarea>
+                </div>
+
+                <div class="adn-rf-field adn-rf-field--full">
+                    <label>Preparación <span>(un paso por línea)</span></label>
+                    <textarea class="adn-rf-textarea" name="_receta_preparacion" rows="10"
+                              placeholder="Ej:&#10;Cocinar los caraotas negros...&#10;Sofreír la carne..."><?php echo esc_textarea( $preparacion ); ?></textarea>
+                </div>
+
+            </div>
+
+            <div class="adn-rf-actions">
+                <button type="submit" class="adn-rf-submit">
+                    <?php echo $is_edit ? 'Guardar cambios' : 'Publicar Receta'; ?>
+                </button>
+                <a href="<?php echo esc_url( $list_url ); ?>" class="adn-rf-cancel">Cancelar</a>
+            </div>
+        </form>
+        <?php
+    }
+
+    public function handle_receta_save(): void {
+        if ( ! isset( $_POST['adn_receta_frontend_nonce'] ) ) {
+            return;
+        }
+        $nonce = sanitize_text_field( wp_unslash( $_POST['adn_receta_frontend_nonce'] ) );
+        if ( ! wp_verify_nonce( $nonce, 'adn_receta_frontend_save' ) ) {
+            wp_die( 'Error de seguridad.' );
+        }
+        if ( ! is_user_logged_in() || ! current_user_can( 'edit_recetas' ) ) {
+            wp_die( 'Sin permisos.' );
+        }
+
+        $post_id = (int) ( $_POST['receta_post_id'] ?? 0 );
+        $is_edit = $post_id > 0;
+
+        if ( $is_edit ) {
+            $post = get_post( $post_id );
+            if ( ! $post || $post->post_type !== 'receta' || (int) $post->post_author !== get_current_user_id() ) {
+                wp_die( 'No puedes editar esta receta.' );
+            }
+        }
+
+        $title        = sanitize_text_field( wp_unslash( $_POST['receta_titulo']        ?? '' ) );
+        $excerpt      = sanitize_textarea_field( wp_unslash( $_POST['receta_excerpt']   ?? '' ) );
+        $tiempo       = sanitize_text_field( wp_unslash( $_POST['_receta_tiempo']       ?? '' ) );
+        $porciones    = sanitize_text_field( wp_unslash( $_POST['_receta_porciones']    ?? '' ) );
+        $dificultad   = sanitize_text_field( wp_unslash( $_POST['_receta_dificultad']   ?? '' ) );
+        $youtube      = esc_url_raw( wp_unslash( $_POST['_receta_youtube']              ?? '' ) );
+        $ingredientes = sanitize_textarea_field( wp_unslash( $_POST['_receta_ingredientes'] ?? '' ) );
+        $preparacion  = sanitize_textarea_field( wp_unslash( $_POST['_receta_preparacion']  ?? '' ) );
+        $categorias   = array_map( 'intval', (array) ( $_POST['receta_categorias']      ?? [] ) );
+
+        $list_url = function_exists( 'wc_get_account_endpoint_url' ) ? wc_get_account_endpoint_url( 'mis-recetas' ) : '/mi-cuenta/mis-recetas/';
+
+        if ( empty( $title ) ) {
+            $back = $is_edit
+                ? add_query_arg( [ 'action' => 'editar', 'id' => $post_id, 'error' => 'titulo_vacio' ], $list_url )
+                : add_query_arg( [ 'action' => 'nueva',  'error' => 'titulo_vacio' ], $list_url );
+            wp_safe_redirect( $back );
+            exit;
+        }
+
+        $post_data = [
+            'post_title'   => $title,
+            'post_excerpt' => $excerpt,
+            'post_status'  => 'publish',
+            'post_type'    => 'receta',
+            'post_author'  => get_current_user_id(),
+        ];
+        if ( $is_edit ) {
+            $post_data['ID'] = $post_id;
+            $saved_id = wp_update_post( $post_data, true );
+        } else {
+            $saved_id = wp_insert_post( $post_data, true );
+        }
+        if ( is_wp_error( $saved_id ) ) {
+            wp_die( 'Error al guardar: ' . esc_html( $saved_id->get_error_message() ) );
+        }
+
+        update_post_meta( $saved_id, '_receta_tiempo',       $tiempo );
+        update_post_meta( $saved_id, '_receta_porciones',    $porciones );
+        update_post_meta( $saved_id, '_receta_dificultad',   $dificultad );
+        update_post_meta( $saved_id, '_receta_youtube',      $youtube );
+        update_post_meta( $saved_id, '_receta_ingredientes', $ingredientes );
+        update_post_meta( $saved_id, '_receta_preparacion',  $preparacion );
+
+        wp_set_post_terms( $saved_id, $categorias, 'categoria_receta' );
+
+        if ( isset( $_POST['receta_remove_imagen'] ) && '1' === $_POST['receta_remove_imagen'] ) {
+            delete_post_thumbnail( $saved_id );
+        }
+
+        if ( ! empty( $_FILES['receta_imagen']['name'] ) && ! is_wp_error( $_FILES['receta_imagen'] ) ) {
+            require_once ABSPATH . 'wp-admin/includes/image.php';
+            require_once ABSPATH . 'wp-admin/includes/file.php';
+            require_once ABSPATH . 'wp-admin/includes/media.php';
+            $att_id = media_handle_upload( 'receta_imagen', $saved_id );
+            if ( ! is_wp_error( $att_id ) ) {
+                set_post_thumbnail( $saved_id, $att_id );
+            }
+        }
+
+        wp_safe_redirect( add_query_arg( 'saved', '1', $list_url ) );
+        exit;
+    }
+
+    public function ajax_delete_receta(): void {
+        $post_id = (int) ( $_POST['post_id'] ?? 0 );
+        $nonce   = sanitize_text_field( wp_unslash( $_POST['nonce'] ?? '' ) );
+
+        if ( ! wp_verify_nonce( $nonce, 'adn_delete_receta_' . $post_id ) ) {
+            wp_send_json_error( 'Nonce inválido.' );
+        }
+        if ( ! current_user_can( 'edit_recetas' ) ) {
+            wp_send_json_error( 'Sin permisos.' );
+        }
+        $post = get_post( $post_id );
+        if ( ! $post || $post->post_type !== 'receta' || (int) $post->post_author !== get_current_user_id() ) {
+            wp_send_json_error( 'No puedes eliminar esta receta.' );
+        }
+        wp_trash_post( $post_id ) ? wp_send_json_success() : wp_send_json_error( 'Error al eliminar.' );
     }
 
     // ─── Acceso wp-admin para editor_recetas ─────────────────────────────────
