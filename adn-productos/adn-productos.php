@@ -93,13 +93,7 @@ class ADN_Productos_Plugin {
         add_filter( 'woocommerce_customer_get_billing_country',  array( $this, 'default_country_ve' ) );
         add_filter( 'woocommerce_customer_get_shipping_country', array( $this, 'default_country_ve' ) );
 
-        // ── Recetas ────────────────────────────────────────────────────────────
-        add_action( 'init',             array( $this, 'register_receta_post_type' ) );
-        add_action( 'init',             array( $this, 'register_receta_roles' ) );
-        add_action( 'add_meta_boxes',   array( $this, 'receta_meta_boxes' ) );
-        add_action( 'save_post_receta', array( $this, 'receta_save_meta' ), 10, 2 );
-        add_shortcode( 'adn_recetas',   array( $this, 'render_recetas_shortcode' ) );
-        add_filter( 'the_content',      array( $this, 'receta_single_content' ) );
+        // Recetas: gestionadas por el plugin adn-recetas
     }
 
     /**
@@ -2523,12 +2517,8 @@ class ADN_Productos_Plugin {
         <?php
     }
 
-    // ─── Recetas: CPT ──────────────────────────────────────────────────────────────────
+    // ─── Recetas: ver plugin adn-recetas ──────────────────────────────────────
 
-    /**
-     * Inyecta los campos de la receta en la página individual (single receta).
-     * Layout: hero 2-col (video | info+meta) + panel 2-col (ingredientes | preparación).
-     */
     public function receta_single_content( string $content ): string {
         if ( ! is_singular( 'receta' ) || ! in_the_loop() || ! is_main_query() ) {
             return $content;
