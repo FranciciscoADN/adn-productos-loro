@@ -81,12 +81,10 @@ class ADN_Recetas_Plugin {
     }
 
     private function render_receta_list(): void {
-        $user_id  = get_current_user_id();
         $list_url = function_exists( 'wc_get_account_endpoint_url' ) ? wc_get_account_endpoint_url( 'mis-recetas' ) : '/mi-cuenta/mis-recetas/';
         $new_url  = add_query_arg( 'action', 'nueva', $list_url );
         $query    = new WP_Query( [
             'post_type'      => 'receta',
-            'author'         => $user_id,
             'post_status'    => [ 'publish', 'draft', 'pending' ],
             'posts_per_page' => -1,
             'orderby'        => 'date',
@@ -202,8 +200,8 @@ class ADN_Recetas_Plugin {
 
         if ( $is_edit ) {
             $post = get_post( $post_id );
-            if ( ! $post || $post->post_type !== 'receta' || (int) $post->post_author !== get_current_user_id() ) {
-                echo '<p>No tienes permisos para editar esta receta. <a href="' . esc_url( $list_url ) . '">Volver</a></p>';
+            if ( ! $post || $post->post_type !== 'receta' ) {
+                echo '<p>Receta no encontrada. <a href="' . esc_url( $list_url ) . '">Volver</a></p>';
                 return;
             }
         }
@@ -386,8 +384,8 @@ class ADN_Recetas_Plugin {
 
         if ( $is_edit ) {
             $post = get_post( $post_id );
-            if ( ! $post || $post->post_type !== 'receta' || (int) $post->post_author !== get_current_user_id() ) {
-                wp_die( 'No puedes editar esta receta.' );
+            if ( ! $post || $post->post_type !== 'receta' ) {
+                wp_die( 'Receta no encontrada.' );
             }
         }
 
@@ -466,8 +464,8 @@ class ADN_Recetas_Plugin {
             wp_send_json_error( 'Sin permisos.' );
         }
         $post = get_post( $post_id );
-        if ( ! $post || $post->post_type !== 'receta' || (int) $post->post_author !== get_current_user_id() ) {
-            wp_send_json_error( 'No puedes eliminar esta receta.' );
+        if ( ! $post || $post->post_type !== 'receta' ) {
+            wp_send_json_error( 'Receta no encontrada.' );
         }
         wp_trash_post( $post_id ) ? wp_send_json_success() : wp_send_json_error( 'Error al eliminar.' );
     }
@@ -545,7 +543,7 @@ class ADN_Recetas_Plugin {
     // ─── Rol Editor de Recetas ────────────────────────────────────────────────
 
     public function setup_roles(): void {
-        if ( get_option( 'adn_recetas_plugin_roles_ver' ) === '1' ) {
+        if ( get_option( 'adn_recetas_plugin_roles_ver' ) === '2' ) {
             return;
         }
 
@@ -576,14 +574,16 @@ class ADN_Recetas_Plugin {
             'upload_files'             => true,
             'manage_categories'        => true,
             'edit_recetas'             => true,
+            'edit_others_recetas'      => true,
             'edit_published_recetas'   => true,
             'publish_recetas'          => true,
             'delete_recetas'           => true,
+            'delete_others_recetas'    => true,
             'delete_published_recetas' => true,
             'create_recetas'           => true,
         ] );
 
-        update_option( 'adn_recetas_plugin_roles_ver', '1' );
+        update_option( 'adn_recetas_plugin_roles_ver', '2' );
     }
 
     // ─── Meta Boxes ──────────────────────────────────────────────────────────
