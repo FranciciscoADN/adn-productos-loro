@@ -95,7 +95,7 @@ class ADN_Recetas_Plugin {
         ?>
         <style>
         .adn-mr-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem; flex-wrap:wrap; gap:.8rem; }
-        .adn-mr-btn { display:inline-block; padding:9px 22px; border-radius:6px; background:#e84248; color:#fff !important; font-weight:700; font-size:.9rem; text-decoration:none !important; transition:opacity .2s; cursor:pointer; border:none; }
+        .adn-mr-btn { display:inline-block; padding:9px 22px; border-radius:6px; background: #01215e; color:#fff !important; font-weight:700; font-size:.9rem; text-decoration:none !important; transition:opacity .2s; cursor:pointer; border:none; }
         .adn-mr-btn:hover { opacity:.85; }
         .adn-mr-btn--ghost { background:transparent; border:2px solid #e84248; color:#e84248 !important; }
         .adn-mr-btn--ghost:hover { background:#e84248; color:#fff !important; }
@@ -246,7 +246,7 @@ class ADN_Recetas_Plugin {
         .adn-rf-sep { grid-column:1/-1; border:none; border-top:1.5px solid #eee; margin:.4rem 0; }
         .adn-rf-section-label { grid-column:1/-1; font-size:.78rem; text-transform:uppercase; letter-spacing:.1em; color:#aaa; font-weight:700; margin-bottom:-.6rem; }
         .adn-rf-actions { display:flex; gap:1rem; align-items:center; flex-wrap:wrap; margin-top:1rem; }
-        .adn-rf-submit { padding:11px 28px; border-radius:6px; background:#e84248; color:#fff; font-weight:700; font-size:.95rem; border:none; cursor:pointer; transition:opacity .2s; }
+        .adn-rf-submit { padding:11px 28px; border-radius:6px; background:#01215e; color:#fff; font-weight:700; font-size:.95rem; border:none; cursor:pointer; transition:opacity .2s; }
         .adn-rf-submit:hover { opacity:.85; }
         .adn-rf-cancel { font-size:.9rem; color:#888; text-decoration:none; }
         .adn-rf-cancel:hover { color:#e84248; }
