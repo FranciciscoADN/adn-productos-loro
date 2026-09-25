@@ -104,7 +104,7 @@ class ADN_Recetas_Plugin {
         .adn-mr-status { display:inline-block; padding:2px 10px; border-radius:20px; font-size:.78rem; font-weight:600; }
         .adn-mr-status--pub   { background:#e6f7ee; color:#1a7f47; }
         .adn-mr-status--draft { background:#f0f0f0; color:#777; }
-        .adn-mr-actions { display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; }
+        .adn-mr-actions { display:inline-flex; gap:.5rem; flex-wrap:wrap; align-items:center; }
         .adn-mr-actions a, .adn-mr-del { font-size:.85rem; text-decoration:none; padding:4px 12px; border-radius:4px; font-weight:600; cursor:pointer; border:none; background:none; }
         .adn-mr-actions .adn-mr-edit { color:#fff; background:#1976d2; }
         .adn-mr-actions .adn-mr-view { color:#555; background:#f0f0f0; }
